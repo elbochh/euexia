@@ -1,0 +1,130 @@
+@import url('https://fonts.googleapis.com/css2?family=Fredoka:wght@300;400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --game-bg: #1a1a2e;
+  --game-panel: #16213e;
+  --game-accent: #0f3460;
+  --game-highlight: #e94560;
+  --gold: #fbbf24;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html,
+body {
+  font-family: 'Fredoka', sans-serif;
+  background: var(--game-bg);
+  color: #e0e0e0;
+  overflow-x: hidden;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+}
+::-webkit-scrollbar-track {
+  background: var(--game-panel);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--game-accent);
+  border-radius: 3px;
+}
+
+/* Game-style button */
+@layer components {
+  .btn-game {
+    @apply relative px-6 py-3 rounded-xl font-semibold text-white transition-all duration-200 transform active:scale-95;
+    background: linear-gradient(180deg, #4ade80 0%, #16a34a 100%);
+    box-shadow: 0 4px 0 #14532d, 0 6px 12px rgba(0, 0, 0, 0.3);
+  }
+  .btn-game:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 0 #14532d, 0 8px 16px rgba(0, 0, 0, 0.3);
+  }
+  .btn-game:active {
+    transform: translateY(2px);
+    box-shadow: 0 2px 0 #14532d, 0 3px 6px rgba(0, 0, 0, 0.3);
+  }
+
+  .btn-game-secondary {
+    @apply relative px-6 py-3 rounded-xl font-semibold text-white transition-all duration-200 transform active:scale-95;
+    background: linear-gradient(180deg, #60a5fa 0%, #2563eb 100%);
+    box-shadow: 0 4px 0 #1e3a8a, 0 6px 12px rgba(0, 0, 0, 0.3);
+  }
+
+  .btn-game-danger {
+    @apply relative px-6 py-3 rounded-xl font-semibold text-white transition-all duration-200 transform active:scale-95;
+    background: linear-gradient(180deg, #f87171 0%, #dc2626 100%);
+    box-shadow: 0 4px 0 #7f1d1d, 0 6px 12px rgba(0, 0, 0, 0.3);
+  }
+
+  .game-card {
+    @apply rounded-2xl p-4 border-2;
+    background: linear-gradient(135deg, rgba(22, 33, 62, 0.9), rgba(15, 52, 96, 0.7));
+    border-color: rgba(96, 165, 250, 0.2);
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  }
+
+  .game-panel {
+    @apply rounded-2xl;
+    background: linear-gradient(180deg, #16213e 0%, #0f3460 100%);
+    border: 2px solid rgba(96, 165, 250, 0.15);
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+  }
+
+  .coin-badge {
+    @apply inline-flex items-center gap-1 px-3 py-1 rounded-full text-sm font-bold;
+    background: linear-gradient(135deg, #fbbf24, #f59e0b);
+    color: #78350f;
+    box-shadow: 0 2px 8px rgba(251, 191, 36, 0.4);
+  }
+
+  .xp-badge {
+    @apply inline-flex items-center gap-1 px-3 py-1 rounded-full text-sm font-bold;
+    background: linear-gradient(135deg, #a78bfa, #7c3aed);
+    color: white;
+    box-shadow: 0 2px 8px rgba(124, 58, 237, 0.4);
+  }
+
+  .level-badge {
+    @apply inline-flex items-center justify-center w-10 h-10 rounded-full text-sm font-bold;
+    background: linear-gradient(135deg, #fbbf24, #ea580c);
+    color: white;
+    box-shadow: 0 2px 8px rgba(234, 88, 12, 0.5);
+    border: 2px solid rgba(255, 255, 255, 0.3);
+  }
+}
+
+/* Animations */
+@keyframes float {
+  0%, 100% { transform: translateY(0px); }
+  50% { transform: translateY(-10px); }
+}
+
+@keyframes sparkle {
+  0%, 100% { opacity: 0; transform: scale(0); }
+  50% { opacity: 1; transform: scale(1); }
+}
+
+@keyframes coinSpin {
+  0% { transform: rotateY(0deg); }
+  100% { transform: rotateY(360deg); }
+}
+
+.animate-float {
+  animation: float 3s ease-in-out infinite;
+}
+
+.animate-sparkle {
+  animation: sparkle 1.5s ease-in-out infinite;
+}
+
