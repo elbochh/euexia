@@ -24,6 +24,8 @@ app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
 // Static file serving for uploads
 app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
+// Static file serving for map images
+app.use('/maps', express.static(path.join(__dirname, '../maps')));
 
 // Routes
 app.use('/api/auth', authRoutes);

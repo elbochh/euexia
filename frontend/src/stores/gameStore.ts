@@ -50,6 +50,77 @@ interface RewardPopup {
   streak: number;
 }
 
+interface MapSpecPoint {
+  x: number;
+  y: number;
+}
+
+interface MapSpecNode extends MapSpecPoint {
+  id: string;
+  index: number;
+  stageType: string;
+  label: string;
+}
+
+interface MapSpecDecor extends MapSpecPoint {
+  assetId: string;
+  scale: number;
+  layer: 'back' | 'mid' | 'front';
+}
+
+export interface PersonalizedMapSpec {
+  version: 1;
+  themeId: 'desert_pyramids' | 'jungle_garden' | 'city_vitamins' | 'wellness_generic';
+  styleTier: 'template' | 'enhanced' | 'ai_art';
+  palette: {
+    primary: string;
+    secondary: string;
+    accent: string;
+    ground: string;
+    sky: string;
+  };
+  background: {
+    imageUrl?: string;
+    parallaxLayers?: Array<{
+      assetId: string;
+      speed: number;
+      opacity: number;
+    }>;
+  };
+  path: MapSpecPoint[];
+  nodes: MapSpecNode[];
+  decor: MapSpecDecor[];
+  character: { skin: string; x: number; y: number };
+  meta: { source: 'ai' | 'fallback'; seed: number; checklistCount: number };
+}
+
+interface Consultation {
+  _id: string;
+  userId: string;
+  title: string;
+  status: string;
+  createdAt: string;
+  maps?: Array<{
+    _id: string;
+    mapIndex: number;
+    startStepIndex: number;
+    endStepIndex: number;
+    mapSpec: PersonalizedMapSpec;
+    source: 'ai' | 'fallback';
+  }>;
+  checklistItems?: ChecklistItem[];
+  totalSteps?: number;
+}
+
+interface CurrentMapInfo {
+  consultationId: string;
+  consultationTitle: string;
+  mapIndex: number;
+  startStepIndex: number;
+  endStepIndex: number;
+  totalSteps: number;
+}
+
 interface GameStore {
   // Auth
   user: User | null;
@@ -60,6 +131,12 @@ interface GameStore {
   progress: GameProgress | null;
   checklist: ChecklistItem[];
   rewardPopup: RewardPopup | null;
+  mapSpec: PersonalizedMapSpec | null;
+  mapSpecSource: 'ai' | 'fallback' | null;
+  mapValidationWarnings: string[];
+  mapImageUrl: string | null;
+  currentMapInfo: CurrentMapInfo | null;
+  consultations: Consultation[];
   isLoading: boolean;
 
   // Leaderboard
@@ -75,6 +152,10 @@ interface GameStore {
   completeItem: (itemId: string) => Promise<RewardPopup | null>;
   dismissReward: () => void;
   loadLeaderboard: () => Promise<void>;
+  loadMapSpec: () => Promise<void>;
+  loadCurrentMap: () => Promise<void>;
+  loadMap: (consultationId: string, mapIndex?: number) => Promise<void>;
+  loadConsultationsWithMaps: () => Promise<void>;
   initFromStorage: () => void;
 }
 
@@ -86,6 +167,12 @@ export const useGameStore = create<GameStore>((set, get) => ({
   progress: null,
   checklist: [],
   rewardPopup: null,
+  mapSpec: null,
+  mapSpecSource: null,
+  mapValidationWarnings: [],
+  mapImageUrl: null,
+  currentMapInfo: null,
+  consultations: [],
   isLoading: false,
   leaderboard: [],
   userRank: 0,
@@ -181,6 +268,72 @@ export const useGameStore = create<GameStore>((set, get) => ({
       });
     } catch (error) {
       console.error('Failed to load leaderboard:', error);
+    }
+  },
+
+  loadMapSpec: async () => {
+    try {
+      const res = await gameApi.getMapSpec();
+      set({
+        mapSpec: res.data.mapSpec,
+        mapSpecSource: res.data.source || null,
+        mapValidationWarnings: res.data.validation?.warnings || [],
+      });
+    } catch (error) {
+      console.error('Failed to load map spec:', error);
+    }
+  },
+
+  loadCurrentMap: async () => {
+    try {
+      const res = await gameApi.getCurrentMap();
+      set({
+        mapSpec: res.data.mapSpec,
+        mapSpecSource: res.data.source || null,
+        mapValidationWarnings: res.data.validation?.warnings || [],
+        mapImageUrl: res.data.mapImageUrl || null,
+        currentMapInfo: {
+          consultationId: res.data.consultationId,
+          consultationTitle: res.data.consultationTitle || 'My Consultation',
+          mapIndex: res.data.mapIndex || 0,
+          startStepIndex: res.data.startStepIndex || 0,
+          endStepIndex: res.data.endStepIndex || 0,
+          totalSteps: res.data.totalSteps || 0,
+        },
+      });
+    } catch (error) {
+      console.error('Failed to load current map:', error);
+    }
+  },
+
+  loadMap: async (consultationId: string, mapIndex: number = 0) => {
+    try {
+      const res = await gameApi.getMap(consultationId, mapIndex);
+      set({
+        mapSpec: res.data.mapSpec,
+        mapSpecSource: res.data.source || null,
+        mapValidationWarnings: res.data.validation?.warnings || [],
+        mapImageUrl: res.data.mapImageUrl || null,
+        currentMapInfo: {
+          consultationId: res.data.consultationId,
+          consultationTitle: '',
+          mapIndex: res.data.mapIndex || 0,
+          startStepIndex: res.data.startStepIndex || 0,
+          endStepIndex: res.data.endStepIndex || 0,
+          totalSteps: res.data.totalSteps || 0,
+        },
+      });
+    } catch (error) {
+      console.error('Failed to load map:', error);
+    }
+  },
+
+  loadConsultationsWithMaps: async () => {
+    try {
+      const res = await gameApi.getConsultationsWithMaps();
+      set({ consultations: res.data.consultations || [] });
+    } catch (error) {
+      console.error('Failed to load consultations with maps:', error);
     }
   },
 

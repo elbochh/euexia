@@ -1,11 +1,12 @@
 'use client';
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { motion } from 'framer-motion';
 import dynamic from 'next/dynamic';
 import TopBar from '@/components/ui/TopBar';
 import BottomNav from '@/components/ui/BottomNav';
 import RewardPopup from '@/components/ui/RewardPopup';
+import CheckpointModal from '@/components/game/CheckpointModal';
 import { useGameStore } from '@/stores/gameStore';
 import { GAME_CONFIG } from '@/lib/gameConfig';
 
@@ -13,8 +14,24 @@ const GameCanvas = dynamic(() => import('@/components/game/GameCanvas'), { ssr: 
 
 export default function DashboardPage() {
   const router = useRouter();
-  const { isAuthenticated, progress, checklist, initFromStorage, loadProgress, loadChecklist } =
-    useGameStore();
+  const {
+    isAuthenticated,
+    progress,
+    checklist,
+    mapSpec,
+    mapImageUrl,
+    currentMapInfo,
+    consultations,
+    completeItem,
+    initFromStorage,
+    loadProgress,
+    loadChecklist,
+    loadCurrentMap,
+    loadMap,
+    loadConsultationsWithMaps,
+  } = useGameStore();
+
+  const [selectedCheckpoint, setSelectedCheckpoint] = useState<number | null>(null);
 
   useEffect(() => {
     initFromStorage();
@@ -31,129 +48,142 @@ export default function DashboardPage() {
     if (isAuthenticated) {
       loadProgress();
       loadChecklist();
+      loadCurrentMap();
+      loadConsultationsWithMaps();
     }
   }, [isAuthenticated]);
 
-  const completedCount = checklist.filter((i) => i.isCompleted).length;
-  const totalCount = checklist.length;
+  // Get checklist items for current consultation
+  const currentConsultationId = currentMapInfo?.consultationId;
+  const currentChecklist = currentConsultationId
+    ? checklist.filter((i) => i.consultationId === currentConsultationId)
+    : checklist;
+
+  // Get items for current map only
+  const mapChecklist = currentMapInfo
+    ? currentChecklist.filter(
+        (item, idx) =>
+          idx >= currentMapInfo.startStepIndex && idx <= currentMapInfo.endStepIndex
+      )
+    : currentChecklist.slice(0, 6);
+
+  const completedCount = mapChecklist.filter((i) => i.isCompleted).length;
+  const totalCount = mapChecklist.length;
   const currentTheme = progress?.currentTheme || 'desert';
   const themeInfo = GAME_CONFIG.themeColors[currentTheme];
 
-  const todayTasks = checklist.filter((i) => !i.isCompleted).slice(0, 3);
+  // Get current consultation info
+  const currentConsultation = consultations.find(
+    (c) => c._id === currentMapInfo?.consultationId
+  );
+
+  // Get all maps for current consultation
+  const currentMaps = currentConsultation?.maps || [];
+  const currentMapIndex = currentMapInfo?.mapIndex ?? 0;
+  const hasNextMap = currentMapIndex < currentMaps.length - 1;
+  const hasPrevMap = currentMapIndex > 0;
+
+  const handleNextMap = () => {
+    if (currentMapInfo && hasNextMap) {
+      loadMap(currentMapInfo.consultationId, currentMapIndex + 1);
+    }
+  };
+
+  const handlePrevMap = () => {
+    if (currentMapInfo && hasPrevMap) {
+      loadMap(currentMapInfo.consultationId, currentMapIndex - 1);
+    }
+  };
+
+  const handleCheckpointClick = (index: number) => {
+    setSelectedCheckpoint(index);
+  };
+
+  const handleCloseModal = () => {
+    setSelectedCheckpoint(null);
+  };
+
+  const handleCompleteTask = async (itemId: string) => {
+    await completeItem(itemId);
+    // Modal will close automatically after completion
+  };
+
+  // Get the selected checkpoint item
+  const selectedItem = selectedCheckpoint !== null 
+    ? mapChecklist[selectedCheckpoint] || null
+    : null;
 
   return (
-    <div className="min-h-screen pb-20 pt-14">
+    <div className="h-screen pb-20 pt-14 flex flex-col overflow-hidden">
       <TopBar />
       <RewardPopup />
 
-      <div className="max-w-lg mx-auto px-3">
-        {/* Theme Header */}
-        <motion.div
-          initial={{ opacity: 0, y: -10 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="text-center mb-3 mt-2"
-        >
-          <span className="text-2xl">{themeInfo?.emoji || '🗺️'}</span>
-          <h2 className="text-lg font-bold" style={{ color: themeInfo?.accent }}>
-            {themeInfo?.name || 'Desert Pyramids'}
-          </h2>
-          <p className="text-gray-500 text-xs">
-            {completedCount}/{totalCount} quests completed
-          </p>
-        </motion.div>
-
+      <div className="w-full flex-1 min-h-0 flex flex-col">
         {/* Game Map */}
         <motion.div
           initial={{ opacity: 0, scale: 0.95 }}
           animate={{ opacity: 1, scale: 1 }}
           transition={{ delay: 0.1 }}
+          className="flex-1 min-h-0 relative"
         >
           <GameCanvas
             theme={currentTheme}
             completedCount={completedCount}
-            totalCount={Math.max(totalCount, 5)}
+            totalCount={Math.max(totalCount, mapChecklist.length)}
+            mapSpec={mapSpec}
+            mapImageUrl={mapImageUrl}
+            checklistItems={mapChecklist}
+            onCheckpointClick={handleCheckpointClick}
           />
-        </motion.div>
 
-        {/* Today's Quests Quick View */}
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.3 }}
-          className="mt-4"
-        >
-          <div className="flex items-center justify-between mb-2 px-1">
-            <h3 className="text-sm font-bold text-blue-300">⚔️ Today&apos;s Quests</h3>
-            <button
-              onClick={() => router.push('/checklist')}
-              className="text-xs text-blue-400 hover:text-blue-300"
-            >
-              View All →
-            </button>
-          </div>
-
-          {todayTasks.length > 0 ? (
-            todayTasks.map((task, i) => (
-              <motion.div
-                key={task._id}
-                initial={{ opacity: 0, x: -10 }}
-                animate={{ opacity: 1, x: 0 }}
-                transition={{ delay: 0.4 + i * 0.1 }}
-                className="game-card flex items-center gap-3 mb-2 cursor-pointer"
-                onClick={() => router.push('/checklist')}
-              >
-                <span className="text-xl">
-                  {GAME_CONFIG.categoryIcons[task.category] || '✅'}
-                </span>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-semibold truncate">{task.title}</p>
-                  <p className="text-xs text-gray-500 truncate">{task.description}</p>
-                </div>
-                <div className="text-xs text-purple-300">⚡{task.xpReward}</div>
-              </motion.div>
-            ))
-          ) : (
-            <div className="game-card text-center py-6">
-              <div className="text-3xl mb-2">🎉</div>
-              <p className="text-sm text-gray-400">All quests completed!</p>
-              <button
-                onClick={() => router.push('/upload')}
-                className="btn-game mt-3 text-sm px-6 py-2"
-              >
-                Upload New Consultation
-              </button>
+          {/* In-map HUD (minimal, top-left, no container) */}
+          <motion.div
+            initial={{ opacity: 0, y: -8 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="absolute top-3 left-3 z-10 pointer-events-none"
+          >
+            <div className="text-[10px] font-semibold text-blue-100 drop-shadow-[0_1px_2px_rgba(0,0,0,0.9)]">
+              {themeInfo?.emoji || '🗺️'} QUEST MAP
             </div>
-          )}
-        </motion.div>
-
-        {/* Stats Row */}
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          transition={{ delay: 0.5 }}
-          className="grid grid-cols-3 gap-2 mt-4"
-        >
-          <div className="game-card text-center py-3">
-            <div className="text-2xl mb-1">🔥</div>
-            <div className="text-lg font-bold text-orange-300">{progress?.streak || 0}</div>
-            <div className="text-[10px] text-gray-500">Day Streak</div>
-          </div>
-          <div className="game-card text-center py-3">
-            <div className="text-2xl mb-1">⭐</div>
-            <div className="text-lg font-bold text-yellow-300">{progress?.totalCompleted || 0}</div>
-            <div className="text-[10px] text-gray-500">Completed</div>
-          </div>
-          <div className="game-card text-center py-3">
-            <div className="text-2xl mb-1">🗺️</div>
-            <div className="text-lg font-bold text-blue-300">
-              {(progress?.completedThemes?.length || 0) + 1}
-            </div>
-            <div className="text-[10px] text-gray-500">Maps</div>
-          </div>
+            <h2 className="text-sm font-bold leading-tight text-white drop-shadow-[0_1px_2px_rgba(0,0,0,0.9)]">
+              {currentConsultation?.title || currentMapInfo?.consultationTitle || 'My Consultation'}
+            </h2>
+            <p className="text-[11px] text-blue-100 drop-shadow-[0_1px_2px_rgba(0,0,0,0.9)]">
+              {completedCount}/{totalCount} quests
+              {currentMapInfo && currentMaps.length > 1 && ` • Map ${currentMapIndex + 1}/${currentMaps.length}`}
+            </p>
+            {currentMapInfo && currentMaps.length > 1 && (
+              <div className="flex items-center gap-1.5 mt-1.5 pointer-events-auto">
+                <button
+                  onClick={handlePrevMap}
+                  disabled={!hasPrevMap}
+                  className="px-2 py-1 text-[10px] font-semibold rounded text-white bg-blue-600/70 disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  ← Back
+                </button>
+                <button
+                  onClick={handleNextMap}
+                  disabled={!hasNextMap}
+                  className="px-2 py-1 text-[10px] font-semibold rounded text-white bg-blue-600/70 disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  Next →
+                </button>
+              </div>
+            )}
+          </motion.div>
         </motion.div>
       </div>
 
       <BottomNav />
+
+      {/* Checkpoint Modal */}
+      <CheckpointModal
+        isOpen={selectedCheckpoint !== null && selectedItem !== null}
+        onClose={handleCloseModal}
+        item={selectedItem}
+        checkpointNumber={(selectedCheckpoint ?? 0) + 1}
+        onComplete={handleCompleteTask}
+      />
     </div>
   );
 }

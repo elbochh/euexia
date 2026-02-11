@@ -4,12 +4,15 @@ import {
 } from '@aws-sdk/client-sagemaker-runtime';
 import { sagemakerConfig } from '../config/sagemaker';
 
-// The SDK automatically picks up credentials from:
-//   1. Environment variables (AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY)
-//   2. Shared credentials file (~/.aws/credentials) — set by `aws configure`
-//   3. EC2/ECS instance role (when deployed)
-// So no explicit keys are needed here — your `aws cli` login is enough.
-const client = new SageMakerRuntimeClient({ region: sagemakerConfig.region });
+const sageClient = new SageMakerRuntimeClient({ region: sagemakerConfig.region });
+type Provider = 'openai' | 'sagemaker';
+
+function getProvider(mode: 'text' | 'vision' | 'asr' | 'image_generation'): Provider {
+  if (mode === 'text') return (process.env.AI_TEXT_PROVIDER as Provider) || 'openai';
+  if (mode === 'vision') return (process.env.AI_VISION_PROVIDER as Provider) || 'openai';
+  if (mode === 'asr') return (process.env.AI_ASR_PROVIDER as Provider) || 'openai';
+  return (process.env.AI_IMAGE_GENERATION_PROVIDER as Provider) || 'openai';
+}
 
 export interface SageMakerResponse {
   text: string;
@@ -17,33 +20,70 @@ export interface SageMakerResponse {
 }
 
 /**
- * Invoke MedGemma text model for text-based medical analysis
+ * Invoke OpenAI text model for text-based medical analysis.
+ * Kept under the same function name to avoid touching all agent files.
  */
 export async function invokeTextModel(prompt: string): Promise<SageMakerResponse> {
   if (sagemakerConfig.useMock) {
     return mockTextResponse(prompt);
   }
+  const provider = getProvider('text');
+  if (provider === 'sagemaker') {
+    if (!sagemakerConfig.endpoints.medGemmaText) {
+      throw new Error('AI_TEXT_PROVIDER=sagemaker but SAGEMAKER_MEDGEMMA_TEXT_ENDPOINT is missing');
+    }
+    const command = new InvokeEndpointCommand({
+      EndpointName: sagemakerConfig.endpoints.medGemmaText,
+      ContentType: 'application/json',
+      Body: JSON.stringify({
+        inputs: prompt,
+        parameters: {
+          max_new_tokens: 2048,
+          temperature: 0.2,
+        },
+      }),
+    });
+    const response = await sageClient.send(command);
+    const result = JSON.parse(new TextDecoder().decode(response.Body));
+    return { text: result[0]?.generated_text || result.generated_text || '', raw: result };
+  }
 
-  const command = new InvokeEndpointCommand({
-    EndpointName: sagemakerConfig.endpoints.medGemmaText,
-    ContentType: 'application/json',
-    Body: JSON.stringify({
-      inputs: prompt,
-      parameters: {
-        max_new_tokens: 2048,
-        temperature: 0.3,
-        top_p: 0.9,
-      },
+  const apiKey = process.env.OPENAI_API_KEY;
+  const model = process.env.OPENAI_TEXT_MODEL || 'gpt-4.1-mini';
+  if (!apiKey) {
+    return mockTextResponse(prompt);
+  }
+
+  const response = await fetch('https://api.openai.com/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      model,
+      temperature: 0.2,
+      messages: [
+        {
+          role: 'system',
+          content: 'You are a precise medical assistant. Return clear, faithful outputs without fabricating facts.',
+        },
+        { role: 'user', content: prompt },
+      ],
     }),
   });
 
-  const response = await client.send(command);
-  const result = JSON.parse(new TextDecoder().decode(response.Body));
-  return { text: result[0]?.generated_text || result.generated_text || '', raw: result };
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(`OpenAI text call failed: ${response.status} ${body}`);
+  }
+
+  const result: any = await response.json();
+  return { text: result?.choices?.[0]?.message?.content || '', raw: result };
 }
 
 /**
- * Invoke MedGemma multimodal model for image + text analysis
+ * Invoke OpenAI multimodal model for image + text analysis.
  */
 export async function invokeImageModel(
   imageBase64: string,
@@ -52,47 +92,214 @@ export async function invokeImageModel(
   if (sagemakerConfig.useMock) {
     return mockImageResponse(prompt);
   }
+  const provider = getProvider('vision');
+  if (provider === 'sagemaker') {
+    if (!sagemakerConfig.endpoints.medGemmaImage) {
+      throw new Error('AI_VISION_PROVIDER=sagemaker but SAGEMAKER_MEDGEMMA_IMAGE_ENDPOINT is missing');
+    }
+    const command = new InvokeEndpointCommand({
+      EndpointName: sagemakerConfig.endpoints.medGemmaImage,
+      ContentType: 'application/json',
+      Body: JSON.stringify({
+        inputs: {
+          image: imageBase64,
+          text: prompt,
+        },
+        parameters: {
+          max_new_tokens: 2048,
+          temperature: 0.2,
+        },
+      }),
+    });
+    const response = await sageClient.send(command);
+    const result = JSON.parse(new TextDecoder().decode(response.Body));
+    return { text: result[0]?.generated_text || result.generated_text || '', raw: result };
+  }
 
-  const command = new InvokeEndpointCommand({
-    EndpointName: sagemakerConfig.endpoints.medGemmaImage,
-    ContentType: 'application/json',
-    Body: JSON.stringify({
-      inputs: {
-        image: imageBase64,
-        text: prompt,
-      },
-      parameters: {
-        max_new_tokens: 2048,
-        temperature: 0.3,
-      },
+  const apiKey = process.env.OPENAI_API_KEY;
+  const model = process.env.OPENAI_VISION_MODEL || 'gpt-4.1-mini';
+  if (!apiKey) {
+    return mockImageResponse(prompt);
+  }
+
+  const imageUrl = imageBase64.startsWith('data:')
+    ? imageBase64
+    : `data:image/png;base64,${imageBase64}`;
+
+  const response = await fetch('https://api.openai.com/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      model,
+      temperature: 0.2,
+      messages: [
+        {
+          role: 'user',
+          content: [
+            { type: 'text', text: prompt },
+            { type: 'image_url', image_url: { url: imageUrl } },
+          ],
+        },
+      ],
     }),
   });
 
-  const response = await client.send(command);
-  const result = JSON.parse(new TextDecoder().decode(response.Body));
-  return { text: result[0]?.generated_text || result.generated_text || '', raw: result };
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(`OpenAI vision call failed: ${response.status} ${body}`);
+  }
+
+  const result: any = await response.json();
+  return { text: result?.choices?.[0]?.message?.content || '', raw: result };
 }
 
 /**
- * Invoke MedASR model for voice transcription
+ * Voice transcription helper.
+ * If real audio bytes are not available, falls back to mock text.
  */
 export async function invokeAsrModel(audioBase64: string): Promise<SageMakerResponse> {
   if (sagemakerConfig.useMock) {
     return mockAsrResponse();
   }
+  const provider = getProvider('asr');
+  if (provider === 'sagemaker') {
+    if (!sagemakerConfig.endpoints.medAsr) {
+      throw new Error('AI_ASR_PROVIDER=sagemaker but SAGEMAKER_MEDASR_ENDPOINT is missing');
+    }
+    const command = new InvokeEndpointCommand({
+      EndpointName: sagemakerConfig.endpoints.medAsr,
+      ContentType: 'application/json',
+      Body: JSON.stringify({
+        inputs: audioBase64,
+        parameters: {},
+      }),
+    });
+    const response = await sageClient.send(command);
+    const result = JSON.parse(new TextDecoder().decode(response.Body));
+    return { text: result.text || result.transcription || '', raw: result };
+  }
 
-  const command = new InvokeEndpointCommand({
-    EndpointName: sagemakerConfig.endpoints.medAsr,
-    ContentType: 'application/json',
-    Body: JSON.stringify({
-      inputs: audioBase64,
-      parameters: {},
-    }),
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) {
+    return mockAsrResponse();
+  }
+
+  try {
+    // Best effort: assume input is base64 audio. If not valid, fallback to mock response.
+    const audioBuffer = Buffer.from(audioBase64, 'base64');
+    if (!audioBuffer.length) {
+      return mockAsrResponse();
+    }
+
+    const form = new FormData();
+    form.append('model', process.env.OPENAI_ASR_MODEL || 'gpt-4o-mini-transcribe');
+    form.append('file', new Blob([audioBuffer], { type: 'audio/wav' }), 'audio.wav');
+
+    const response = await fetch('https://api.openai.com/v1/audio/transcriptions', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: form,
+    });
+
+    if (!response.ok) {
+      const body = await response.text();
+      throw new Error(`OpenAI ASR call failed: ${response.status} ${body}`);
+    }
+
+    const result: any = await response.json();
+    return { text: result?.text || '', raw: result };
+  } catch (error) {
+    console.warn('ASR fallback used:', error);
+    return mockAsrResponse();
+  }
+}
+
+/**
+ * Image generation abstraction to keep a single switch point per mode.
+ * Returns either b64 payload or URL based payload.
+ */
+export async function invokeImageGenerationModel(params: {
+  prompt: string;
+  previousImageBuffer?: Buffer;
+  size?: '1024x1024' | '1024x1792' | '1792x1024';
+  quality?: 'standard' | 'high' | 'medium' | 'low' | 'auto';
+}): Promise<{ b64_json?: string; url?: string; raw?: any }> {
+  const provider = getProvider('image_generation');
+  if (provider === 'sagemaker') {
+    const endpoint = process.env.SAGEMAKER_MAP_IMAGE_GEN_ENDPOINT;
+    if (!endpoint) {
+      throw new Error('AI_IMAGE_GENERATION_PROVIDER=sagemaker but SAGEMAKER_MAP_IMAGE_GEN_ENDPOINT is missing');
+    }
+    const command = new InvokeEndpointCommand({
+      EndpointName: endpoint,
+      ContentType: 'application/json',
+      Body: JSON.stringify({
+        prompt: params.prompt,
+        image_base64: params.previousImageBuffer?.toString('base64') || null,
+        size: params.size || '1024x1024',
+      }),
+    });
+    const response = await sageClient.send(command);
+    const result = JSON.parse(new TextDecoder().decode(response.Body));
+    return { b64_json: result?.b64_json, url: result?.url, raw: result };
+  }
+
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) {
+    throw new Error('OPENAI_API_KEY missing');
+  }
+  const model = process.env.OPENAI_IMAGE_MODEL || 'gpt-image-1';
+  const size = params.size || '1024x1024';
+  const quality = params.quality || (model === 'gpt-image-1' ? 'high' : 'standard');
+
+  if (params.previousImageBuffer && model === 'gpt-image-1') {
+    const form = new FormData();
+    form.append('model', model);
+    form.append('prompt', params.prompt);
+    form.append('size', size);
+    form.append('quality', quality);
+    form.append('n', '1');
+    form.append('image', new Blob([params.previousImageBuffer], { type: 'image/png' }), 'previous-map.png');
+    const response = await fetch('https://api.openai.com/v1/images/edits', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${apiKey}` },
+      body: form,
+    });
+    if (!response.ok) {
+      const body = await response.text();
+      throw new Error(`OpenAI image edit failed: ${response.status} ${body}`);
+    }
+    const data: any = await response.json();
+    return { b64_json: data?.data?.[0]?.b64_json, url: data?.data?.[0]?.url, raw: data };
+  }
+
+  const body: any = { model, prompt: params.prompt, n: 1, size };
+  if (model === 'gpt-image-1') {
+    body.quality = quality;
+  } else {
+    body.quality = quality === 'high' ? 'standard' : quality;
+    body.response_format = 'url';
+  }
+
+  const response = await fetch('https://api.openai.com/v1/images/generations', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(body),
   });
-
-  const response = await client.send(command);
-  const result = JSON.parse(new TextDecoder().decode(response.Body));
-  return { text: result.text || result.transcription || '', raw: result };
+  if (!response.ok) {
+    const err = await response.text();
+    throw new Error(`OpenAI image generation failed: ${response.status} ${err}`);
+  }
+  const data: any = await response.json();
+  return { b64_json: data?.data?.[0]?.b64_json, url: data?.data?.[0]?.url, raw: data };
 }
 
 // ---- Mock responses for development without SageMaker ----
