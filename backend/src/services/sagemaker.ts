@@ -83,7 +83,7 @@ export async function invokeTextModel(prompt: string): Promise<SageMakerResponse
 }
 
 /**
- * Invoke OpenAI multimodal model for image + text analysis.
+ * Invoke MedGemma multimodal model for image + text analysis (chest X-rays, medical images)
  */
 export async function invokeImageModel(
   imageBase64: string,
@@ -103,7 +103,7 @@ export async function invokeImageModel(
       Body: JSON.stringify({
         inputs: {
           image: imageBase64,
-          text: prompt,
+          text: prompt || 'Analyze this medical image and provide findings.',
         },
         parameters: {
           max_new_tokens: 2048,
@@ -174,7 +174,10 @@ export async function invokeAsrModel(audioBase64: string): Promise<SageMakerResp
       ContentType: 'application/json',
       Body: JSON.stringify({
         inputs: audioBase64,
-        parameters: {},
+        parameters: {
+          chunk_length_s: 20,  // MedASR-specific: batch audio in 20-second chunks
+          stride_length_s: 2,  // MedASR-specific: 2-second overlap between chunks
+        },
       }),
     });
     const response = await sageClient.send(command);
@@ -264,7 +267,7 @@ export async function invokeImageGenerationModel(params: {
     form.append('size', size);
     form.append('quality', quality);
     form.append('n', '1');
-    form.append('image', new Blob([params.previousImageBuffer], { type: 'image/png' }), 'previous-map.png');
+    form.append('image', new Blob([new Uint8Array(params.previousImageBuffer)], { type: 'image/png' }), 'previous-map.png');
     const response = await fetch('https://api.openai.com/v1/images/edits', {
       method: 'POST',
       headers: { Authorization: `Bearer ${apiKey}` },
@@ -300,6 +303,51 @@ export async function invokeImageGenerationModel(params: {
   }
   const data: any = await response.json();
   return { b64_json: data?.data?.[0]?.b64_json, url: data?.data?.[0]?.url, raw: data };
+}
+
+/**
+ * Invoke HeAR model for non-speech audio analysis (lung acoustics, etc.)
+ */
+export async function invokeHearModel(audioBase64: string): Promise<SageMakerResponse> {
+  if (sagemakerConfig.useMock) {
+    return { text: 'HeAR analysis: Normal lung sounds detected. No abnormalities found.', raw: {} };
+  }
+
+  const command = new InvokeEndpointCommand({
+    EndpointName: sagemakerConfig.endpoints.hear,
+    ContentType: 'application/json',
+    Body: JSON.stringify({
+      inputs: audioBase64,
+    }),
+  });
+
+  const response = await sageClient.send(command);
+  const result = JSON.parse(new TextDecoder().decode(response.Body));
+  return { text: JSON.stringify(result), raw: result };
+}
+
+/**
+ * Invoke MedSigLIP model for medical image classification/analysis
+ */
+export async function invokeMedSigLIPModel(imageBase64: string, prompt?: string): Promise<SageMakerResponse> {
+  if (sagemakerConfig.useMock) {
+    return { text: 'MedSigLIP analysis: Medical image classified. Features extracted successfully.', raw: {} };
+  }
+
+  const command = new InvokeEndpointCommand({
+    EndpointName: sagemakerConfig.endpoints.medSigLIP,
+    ContentType: 'application/json',
+    Body: JSON.stringify({
+      inputs: {
+        image: imageBase64,
+        ...(prompt && { text: prompt }),
+      },
+    }),
+  });
+
+  const response = await sageClient.send(command);
+  const result = JSON.parse(new TextDecoder().decode(response.Body));
+  return { text: JSON.stringify(result), raw: result };
 }
 
 // ---- Mock responses for development without SageMaker ----

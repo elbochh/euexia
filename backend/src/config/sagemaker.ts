@@ -29,6 +29,8 @@ export const sagemakerConfig = {
   // Or if using SageMaker endpoint names, the SDK resolves them automatically.
   endpoints: {
     medAsr: process.env.SAGEMAKER_MEDASR_ENDPOINT || '',
+    hear: process.env.SAGEMAKER_HEAR_ENDPOINT || '',
+    medSigLIP: process.env.SAGEMAKER_MEDSIGLIP_ENDPOINT || '',
     medGemmaText: process.env.SAGEMAKER_MEDGEMMA_TEXT_ENDPOINT || '',
     medGemmaImage: process.env.SAGEMAKER_MEDGEMMA_IMAGE_ENDPOINT || '',
   },
