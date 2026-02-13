@@ -229,7 +229,7 @@ export async function invokeAsrModel(audioBase64: string): Promise<SageMakerResp
 export async function invokeImageGenerationModel(params: {
   prompt: string;
   previousImageBuffer?: Buffer;
-  size?: '1024x1024' | '1024x1792' | '1792x1024';
+  size?: '1024x1024' | '1024x1536' | '1536x1024' | 'auto';
   quality?: 'standard' | 'high' | 'medium' | 'low' | 'auto';
 }): Promise<{ b64_json?: string; url?: string; raw?: any }> {
   const provider = getProvider('image_generation');

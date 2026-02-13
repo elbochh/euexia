@@ -82,6 +82,7 @@ export const createConsultation = async (req: AuthRequest, res: Response): Promi
 
     // Structure the paragraph into JSON checklist items
     const checklistData = await structureChecklist(checklistParagraph);
+    console.log(`Generated ${checklistData.length} checklist items from GPT for consultation ${consultation._id}`);
 
     // Save checklist items to database
     const checklistItems = await ChecklistItem.insertMany(
@@ -97,6 +98,7 @@ export const createConsultation = async (req: AuthRequest, res: Response): Promi
         order: index,
       }))
     );
+    console.log(`Saved ${checklistItems.length} checklist items to database for consultation ${consultation._id}`);
 
     // Generate maps for this consultation (split into multiple maps if needed)
     console.log(`Generating maps for consultation ${consultation._id} with ${checklistItems.length} items`);

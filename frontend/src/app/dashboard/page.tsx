@@ -6,7 +6,7 @@ import dynamic from 'next/dynamic';
 import TopBar from '@/components/ui/TopBar';
 import BottomNav from '@/components/ui/BottomNav';
 import RewardPopup from '@/components/ui/RewardPopup';
-import CheckpointModal from '@/components/game/CheckpointModal';
+import CheckpointBottomOverlay from '@/components/game/CheckpointBottomOverlay';
 import { useGameStore } from '@/stores/gameStore';
 import { GAME_CONFIG } from '@/lib/gameConfig';
 
@@ -32,9 +32,19 @@ export default function DashboardPage() {
   } = useGameStore();
 
   const [selectedCheckpoint, setSelectedCheckpoint] = useState<number | null>(null);
+  const [showDoctorChat, setShowDoctorChat] = useState(false);
 
   useEffect(() => {
     initFromStorage();
+    
+    // Expose doctor chat function globally for GameCanvas
+    (window as any).__openDoctorChat = () => {
+      setShowDoctorChat(true);
+    };
+    
+    return () => {
+      delete (window as any).__openDoctorChat;
+    };
   }, []);
 
   useEffect(() => {
@@ -176,14 +186,59 @@ export default function DashboardPage() {
 
       <BottomNav />
 
-      {/* Checkpoint Modal */}
-      <CheckpointModal
+      {/* Checkpoint Bottom Overlay */}
+      <CheckpointBottomOverlay
         isOpen={selectedCheckpoint !== null && selectedItem !== null}
         onClose={handleCloseModal}
         item={selectedItem}
         checkpointNumber={(selectedCheckpoint ?? 0) + 1}
         onComplete={handleCompleteTask}
       />
+
+      {/* Doctor Chat Modal (placeholder for now) */}
+      {showDoctorChat && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+          <motion.div
+            initial={{ opacity: 0, scale: 0.9 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.9 }}
+            className="game-card max-w-md w-full relative"
+          >
+            <button
+              onClick={() => setShowDoctorChat(false)}
+              className="absolute top-4 right-4 p-2 rounded-lg hover:bg-gray-700/50 transition-colors"
+            >
+              <svg
+                className="w-5 h-5 text-gray-400"
+                fill="none"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth="2"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+              >
+                <path d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+            <div className="text-center mb-6">
+              <div className="text-5xl mb-2">👨‍⚕️</div>
+              <h3 className="text-xl font-bold text-white">Dr. Consultant</h3>
+              <p className="text-gray-400 text-sm mt-2">How can I help you today?</p>
+            </div>
+            <div className="space-y-3">
+              <button className="w-full btn-game py-3 text-sm">
+                Ask about my treatment plan
+              </button>
+              <button className="w-full btn-game py-3 text-sm">
+                Get medication reminders
+              </button>
+              <button className="w-full btn-game py-3 text-sm">
+                Ask health questions
+              </button>
+            </div>
+          </motion.div>
+        </div>
+      )}
     </div>
   );
 }

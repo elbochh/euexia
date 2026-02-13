@@ -38,16 +38,18 @@ export function analyzeChecklistTheme(items: ChecklistItemLike[]): ThemeProfile 
   const themeKeywords: string[] = [];
   let specialty = 'general wellness';
 
-  // Specialty-level detection first
-  if (allText.match(/\b(dentist|dental|teeth|tooth|oral|gum|toothpaste|floss)\b/)) {
+  // Specialty-level detection first - DENTISTRY (check first, most specific)
+  if (allText.match(/\b(wisdom tooth|tooth removal|tooth extraction|extraction|dentist|dental|teeth|tooth|oral|gum|toothpaste|floss|molar|canine|incisor|root canal|cavity|filling|braces|orthodontist|oral surgery|toothache|dental hygiene|brushing teeth|tooth pain|dental care|tooth cleaning)\b/)) {
     specialty = 'dentistry';
-    themeKeywords.push('dental', 'oral care', 'teeth');
+    themeKeywords.push('dental', 'oral care', 'teeth', 'tooth');
     specificElements.push(
       'giant tooth statues',
       'toothbrush towers',
       'toothpaste streams',
       'floss bridges',
-      'smiling molar landmarks'
+      'smiling molar landmarks',
+      'dental tools',
+      'pearly white teeth structures'
     );
   } else if (allText.match(/\b(chiropractor|chiropractic|spine|vertebra|posture|back pain|back)\b/)) {
     specialty = 'chiropractic';
@@ -159,15 +161,22 @@ export async function detectThemeWithOpenAI(
 
   const prompt = `Determine ONE primary medical specialty theme from the consultation/checklist content.
 
-Rules:
+CRITICAL RULES:
 - Return JSON only.
-- Pick exactly one specialty.
+- Pick exactly one specialty based on SPECIFIC keywords in the content.
 - Theme must reflect user input directly, not generic wellness assumptions.
-- If dental/tooth/oral terms appear, choose dentistry.
-- If chiropractor/spine/back/bone alignment terms appear, choose chiropractic.
-- If chest xray/radiology/lung imaging terms appear, choose chest_radiology.
-- If back/spine/vertebra/posture terms appear, choose chiropractic.
-- Include 5-10 side elements that fit the specialty.
+- Be VERY SPECIFIC: Look for exact medical terms and procedures mentioned.
+
+SPECIFIC THEME DETECTION RULES (check in order):
+1. DENTISTRY: If ANY of these appear → "tooth", "teeth", "dental", "dentist", "wisdom tooth", "tooth removal", "extraction", "oral", "gum", "molar", "canine", "incisor", "root canal", "cavity", "filling", "braces", "orthodontist", "oral surgery", "toothache", "dental hygiene", "flossing", "brushing teeth"
+2. CHIROPRACTIC: If ANY of these appear → "chiropractor", "spine", "back pain", "vertebra", "alignment", "posture", "spinal", "subluxation", "adjustment", "neck pain", "lower back"
+3. CHEST RADIOLOGY: If ANY of these appear → "chest xray", "chest x-ray", "lung imaging", "pulmonary", "radiology", "CT scan chest", "chest imaging"
+4. MEDICATION: If ANY of these appear → "medication", "prescription", "antibiotic", "dosage", "pharmacy", "pill", "tablet", "medicine", "drug"
+5. NUTRITION: If ANY of these appear → "diet", "nutrition", "vegetable", "fruit", "calorie", "meal plan", "eating", "food"
+6. FITNESS: If ANY of these appear → "exercise", "workout", "fitness", "gym", "running", "walking", "cardio"
+7. GENERAL WELLNESS: Only if none of the above match
+
+Include 5-10 side elements that fit the specialty.
 
 Output JSON schema:
 {
@@ -263,88 +272,51 @@ function buildImagePrompt(
   _signals: ChecklistSignals,
   items: ChecklistItemLike[],
   themeProfile?: ThemeProfile,
-  context?: string
+  _context?: string
 ): string {
   const profile = themeProfile || analyzeChecklistTheme(items);
-  const { specificElements, themeKeywords, specialty } = profile;
+  const { themeKeywords, specialty } = profile;
   
-  const elementsList = specificElements.length > 0
-    ? `\nSIDE ELEMENTS TO PLACE ALONG THE PATH:\n${specificElements.map((el, i) => `${i + 1}. ${el}`).join('\n')}`
-    : '';
-
-  // Build context string from items if not provided
-  const contextText = context || items.map((item, idx) => 
-    `Step ${idx + 1}: "${item.title}"${item.description ? ` - ${item.description}` : ''}`
-  ).join('\n');
-
-  // Determine what the entire world should be made of based on theme (EXACT same logic as test script)
+  // Determine optimistic world material based on theme
   let worldMaterial = '';
-  let noPeopleNote = '';
   const themeKeyLower = profile.themeKey?.toLowerCase() || '';
   const specialtyLower = specialty.toLowerCase();
   
   if (themeKeyLower.includes('chiropractic') || themeKeyLower.includes('spine') || themeKeyLower.includes('back')) {
-    worldMaterial = 'an artificial world made ENTIRELY of bones, vertebrae, spine structures, and skeletal elements. Trees are vertebra pillars and bone structures, ground is made of bone fragments, everything is skeletal - creating a dense bone-world landscape. NO leaves, NO green vegetation, NO traditional plants.';
-    noPeopleNote = 'NO people, NO human figures, NO characters - only bones, vertebrae, spine structures, and skeletal elements.';
+    worldMaterial = 'a vibrant world of glowing spine structures, healthy vertebrae, and strong bone formations. Trees are elegant vertebra pillars, ground sparkles with bone fragments. Bright, optimistic, healing energy.';
   } else if (themeKeyLower.includes('dentist') || themeKeyLower.includes('dental')) {
-    worldMaterial = 'an artificial world made ENTIRELY of teeth, tooth structures, toothbrush bristles, and dental elements. Trees are giant molars and tooth structures, ground is made of tooth fragments, everything is dental - creating a dense dental-world landscape. NO leaves, NO green vegetation, NO traditional plants.';
-    noPeopleNote = 'NO people, NO human figures, NO characters - only teeth, dental tools, and oral care elements.';
+    worldMaterial = 'a bright world of pearly white teeth, shiny dental tools, and healthy oral care elements. Trees are gleaming molars, ground glistens with tooth structures. Clean, fresh, optimistic.';
   } else if (themeKeyLower.includes('nutrition') || themeKeyLower.includes('vegetable')) {
-    worldMaterial = 'an artificial world made ENTIRELY of vegetables, fruits, and healthy food elements. Trees are giant vegetables, ground is made of food elements, everything is nutrition-themed - creating a dense food-world landscape. NO traditional leaves or green jungle vegetation.';
+    worldMaterial = 'a colorful world of fresh vegetables, vibrant fruits, and healthy food. Trees are giant colorful vegetables, ground is lush with food elements. Bright, energetic, life-giving.';
   } else if (themeKeyLower.includes('vitamin') || themeKeyLower.includes('supplement')) {
-    worldMaterial = 'an artificial world made ENTIRELY of vitamin bottles, supplement capsules, and nutrient elements. Trees are giant vitamin bottles, ground is made of capsules, everything is supplement-themed - creating a dense vitamin-world landscape. NO traditional leaves or green jungle vegetation.';
+    worldMaterial = 'a glowing world of bright vitamin bottles, colorful supplement capsules, and nutrient elements. Trees are radiant vitamin bottles, ground sparkles with capsules. Energetic, vibrant, healthful.';
   } else if (themeKeyLower.includes('medication') || themeKeyLower.includes('pharmacy')) {
-    worldMaterial = 'an artificial world made ENTIRELY of pills, medicine bottles, and pharmaceutical elements. Trees are giant medicine bottles, ground is made of pills, everything is pharmaceutical - creating a dense medication-world landscape. NO traditional leaves or green jungle vegetation.';
+    worldMaterial = 'a positive world of healing elements - colorful medicine bottles, bright wellness symbols, health icons. Trees are vibrant health symbols, ground glows with positive medical elements. Optimistic, healing, hopeful.';
   } else if (themeKeyLower.includes('fissure') || themeKeyLower.includes('bowel') || themeKeyLower.includes('digestive') || 
              specialtyLower.includes('gastroenterology') || specialtyLower.includes('digestive') ||
              themeKeywords.some(k => k.toLowerCase().includes('fiber') || k.toLowerCase().includes('stool') || k.toLowerCase().includes('bowel'))) {
-    worldMaterial = 'an artificial world made ENTIRELY of digestive system elements - intestines as trees and structures, fiber strands, water droplets, stool softeners, digestive organs. Trees are coiled intestines, ground is made of digestive elements, everything is digestive-system themed - creating a dense digestive-world landscape. NO traditional leaves, NO green vegetation, NO plants.';
-    noPeopleNote = 'NO people, NO human figures, NO characters - only digestive system elements, intestines, fiber, and digestive-related medical elements.';
+    worldMaterial = 'a vibrant world of healthy digestive elements - colorful fiber strands, glowing water droplets, wellness symbols. Trees are healthy digestive structures, ground sparkles with wellness elements. Bright, positive, healing.';
   } else {
-    worldMaterial = 'an artificial world made ENTIRELY of themed medical elements related to the specialty. Everything in the landscape should be constructed from medical/health elements - NO traditional leaves, NO green vegetation, NO natural plants. The world should feel dense and jungle-like in structure but be completely artificial and themed.';
+    worldMaterial = 'a vibrant, optimistic world made of positive health and wellness elements. Bright, colorful, energetic themed elements. NO traditional vegetation.';
   }
 
-  return `Create a beautiful, detailed, 3D perspective/isometric view medical map background image with a SINGLE MAIN PATH, like a Rick and Morty dimension portal view.
+  // Use only top 5 theme keywords to keep it short
+  const keywords = themeKeywords.slice(0, 5).join(', ');
 
-CRITICAL LAYOUT REQUIREMENTS (MUST FOLLOW):
-- EXACTLY ONE SINGLE MAIN PATH ONLY. No branches, no forks, no crossroads, no multiple routes.
-- PERSPECTIVE VIEW: The image should be viewed from a person's perspective looking down a path into the distance (isometric/3D perspective, NOT top-down).
-- The path starts from the BOTTOM/FOREGROUND of the image and winds SNAKE-LIKE into the DISTANCE/TOP of the image.
-- The path should be thick, wide, and clearly visible, receding into the distance with proper perspective (wider in foreground, narrower in background).
-- The path should be SNAKE-LIKE and WAVY - like a serpent winding its way into the distance, with smooth S-curves and gentle bends visible from the perspective view.
-- The path should curve and wind naturally, creating a serpentine/snake-like appearance as it extends into the distance.
-- Use proper 3D perspective: foreground elements are larger, background elements are smaller, creating depth.
-- NO city layouts, NO complex road networks, NO side paths, NO branches.
-- The path must be the dominant visual element, clearly visible as it winds from foreground to background.
+  return `Create a vibrant, optimistic 3D perspective medical map with a SINGLE SNAKE-LIKE PATH that CROSSES THE ENTIRE IMAGE from bottom edge to top edge.
 
-THEME REQUIREMENTS:
-- Medical Specialty: ${specialty}
-- User Context: ${contextText}
-- Theme Keywords: ${themeKeywords.join(', ')}${elementsList}
-- On BOTH SIDES of the path, place themed elements that match the medical specialty.
-- Make themed elements look natural and integrated into the landscape.
-${noPeopleNote ? `${noPeopleNote}\n` : ''}
-VISUAL STYLE REQUIREMENTS:
-- ARTIFICIAL WORLD: The entire landscape should be ${worldMaterial}
-- The world should feel dense and jungle-like in STRUCTURE (dense, layered, complex) but be completely artificial and made of themed elements.
-- NO traditional vegetation: NO leaves, NO green plants, NO natural trees, NO grass, NO traditional jungle elements.
-- EVERYTHING must be made of themed medical elements - trees, ground, structures, everything.
-- 3D REALISTIC STYLE: Three-dimensional depth, realistic lighting, shadows, and perspective.
-- ISOMETRIC/PERSPECTIVE VIEW: Like Rick and Morty dimension portals - viewed from a person's perspective looking down a path into the distance, NOT top-down.
-- The camera/viewpoint should be positioned as if standing at the start of the path, looking forward into the themed world.
-- Use proper perspective: foreground is close and large, background is distant and smaller, creating a sense of depth and distance.
-- Vibrant, colorful, high-detail illustration with Rick and Morty aesthetic.
-- The path should look like a cleared route through this artificial themed-element world, receding into the distance.
-- Think Rick and Morty dimension style - an entire artificial world constructed from a single theme, viewed from a person's perspective.
+CRITICAL PATH REQUIREMENTS:
+- Path MUST start at the very BOTTOM EDGE of the image (y=1.0) and wind ALL THE WAY to the very TOP EDGE (y=0.0)
+- Path MUST be visible from bottom to top, crossing the full height of the image
+- Path should be snake-like with smooth curves, winding from bottom foreground to top background
+- Path must be wide, clearly visible, and the dominant visual element
+- Use 3D perspective: path wider at bottom (foreground), narrower at top (background)
 
-TECHNICAL REQUIREMENTS:
-- No text overlays, no UI elements, no numbers, no labels.
-- No people, no human figures, no characters (unless theme specifically requires it).
-- This is a pure background image only.
-- High quality, detailed, professional illustration.
-- The path must be clearly visible and easy to follow from bottom to top.
+LAYOUT: One main path only, perspective view (NOT top-down), path spans full image height from bottom edge to top edge.
 
-IMPORTANT: The image must show EXACTLY ONE MAIN PATH from bottom to top. The jungle/vegetation around the path should be made entirely of themed medical elements (bones for chiropractic, teeth for dental, vegetables for nutrition, etc.), not traditional trees. 3D realistic style with themed-element jungle.`;
+THEME: ${specialty}. Keywords: ${keywords}. World made of ${worldMaterial}. Place positive themed elements along both sides of path.
+
+STYLE: 3D isometric perspective like Rick and Morty portals. Vibrant, colorful, optimistic, high-detail. Bright lighting, positive energy. NO traditional vegetation, NO people, NO text. Pure background image.`;
 }
 
 /**
@@ -374,24 +346,21 @@ export async function generateMapImage(
 
   try {
     const effectiveTheme = params.themeProfile || analyzeChecklistTheme(items);
-    // Build context from raw consultation text first, otherwise fallback to map chunk text
-    const context = (params.rawContext && params.rawContext.trim()) || items.map((item, idx) =>
-      `${item.title}${item.description ? ` - ${item.description}` : ''}`
-    ).join('. ');
-    let prompt = buildImagePrompt(signals, items, effectiveTheme, context);
+    // Don't pass context - only use theme for image generation
+    let prompt = buildImagePrompt(signals, items, effectiveTheme);
     const themeKey = params.themeKey || effectiveTheme.themeKey;
     const stepCount = params.stepCount || Math.max(2, items.length);
     const imageModel = process.env.OPENAI_IMAGE_MODEL || 'gpt-image-1';
 
     // Continuation instruction for maps after the first one.
     if ((params.continuationLevel || 1) > 1) {
-      prompt += `\n\nCONTINUATION REQUIREMENT:\n- This is LEVEL ${params.continuationLevel} of the SAME world.\n- Continue from the previous map image with the same visual identity, style, color language, and themed world objects.\n- Keep path continuity so it feels like the next chapter, not a new unrelated map.`;
+      prompt += `\n\nCONTINUATION: Level ${params.continuationLevel} of same world. Continue visual style and path from previous map.`;
     }
 
-    // Hard cap required by image generation endpoint.
+    // Safety check - prompt should now be well under limit, but keep as safeguard
     if (prompt.length > 4000) {
-      const keep = 3950;
-      prompt = `${prompt.slice(0, keep)}...`;
+      console.warn(`Prompt still too long (${prompt.length} chars), truncating...`);
+      prompt = prompt.slice(0, 3950);
     }
 
     console.log(
@@ -410,7 +379,7 @@ export async function generateMapImage(
     const generated = await invokeImageGenerationModel({
       prompt,
       previousImageBuffer,
-      size: '1024x1792',
+      size: '1024x1536', // Vertical/portrait orientation for mobile (supported by DALL-E)
       quality: imageModel === 'gpt-image-1' ? 'high' : 'standard',
     });
 
@@ -521,39 +490,55 @@ export async function analyzeMapImageForCheckpoints(
     // Convert buffer to base64
     const imageBase64 = imageBuffer.toString('base64');
     
+    const itemsList = items.map((item, idx) => `  ${idx + 1}. ${item.title || `Step ${idx + 1}`}`).join('\n');
+    
     const prompt = `You are analyzing a medical journey map image. This image shows a single path winding from the bottom/foreground to the top/background in a perspective/isometric view (like Rick and Morty dimension portals).
 
-Your task:
-1. Identify the SINGLE MAIN PATH in the image - it should be a snake-like winding path from bottom to top
-2. Determine ${stepCount} checkpoint positions along this path, evenly distributed from start to end
-3. Return the path as a series of points following the path's curve
-4. Return checkpoint positions as nodes placed ON the path
+CRITICAL REQUIREMENTS:
+1. You MUST identify the SINGLE MAIN PATHWAY in the image - it should be a snake-like winding path from bottom to top
+2. You MUST determine EXACTLY ${stepCount} checkpoint positions along this path
+3. Each checkpoint corresponds to a step in the journey:
+${itemsList}
+4. Checkpoints MUST be evenly distributed along the path's length from start (bottom) to end (top)
+5. ALL checkpoints MUST be positioned directly ON the pathway, not beside it or off the path
 
-IMPORTANT:
+COORDINATE SYSTEM:
 - The image is viewed from a person's perspective (isometric/3D perspective), NOT top-down
-- Coordinates should be normalized (0.0 to 1.0) where:
-  - x: 0.0 = left edge, 1.0 = right edge
-  - y: 0.0 = top edge, 1.0 = bottom edge (y increases downward)
-- The path starts near the bottom (y close to 1.0) and winds to the top (y close to 0.0)
-- Checkpoints should be evenly spaced along the path's length
-- All checkpoints must be ON the path, not beside it
+- Coordinates are normalized (0.0 to 1.0) where:
+  - x: 0.0 = left edge of image, 1.0 = right edge of image
+  - y: 0.0 = top edge of image, 1.0 = bottom edge of image (y increases downward)
+- The path typically starts near the bottom-center (x ~0.5, y ~0.9-0.95) and winds upward
+- The path typically ends near the top (y ~0.05-0.15)
 
-Return ONLY a valid JSON object with this exact structure:
+NODE PLACEMENT RULES:
+- The first node (index 0) should be near the START of the path (bottom, y close to 1.0)
+- The last node (index ${stepCount - 1}) should be near the END of the path (top, y close to 0.0)
+- Intermediate nodes should be evenly spaced along the path's curve
+- Each node's x and y coordinates must be ON the visible pathway
+- If the path curves left/right, follow the curve with the nodes
+
+Return ONLY a valid JSON object with this exact structure (no markdown, no code blocks):
 {
   "path": [
     {"x": 0.5, "y": 0.95},
     {"x": 0.52, "y": 0.88},
+    {"x": 0.48, "y": 0.82},
     ...
   ],
   "nodes": [
     {"x": 0.5, "y": 0.95, "index": 0},
     {"x": 0.52, "y": 0.88, "index": 1},
+    {"x": 0.48, "y": 0.82, "index": 2},
     ...
   ]
 }
 
-The "path" array should have 15-25 points that trace the path's curve.
-The "nodes" array should have exactly ${stepCount} checkpoints evenly distributed along the path.`;
+REQUIREMENTS:
+- The "path" array should have 20-30 points that accurately trace the path's curve from bottom to top
+- The "nodes" array MUST have exactly ${stepCount} checkpoints (no more, no less)
+- Each node must have an "index" field (0, 1, 2, ..., ${stepCount - 1})
+- All coordinates must be between 0.0 and 1.0
+- Nodes must be in order from start (index 0) to end (index ${stepCount - 1})`;
 
     let content = '';
     if (provider === 'sagemaker') {

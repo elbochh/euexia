@@ -279,7 +279,7 @@ export default function GameCanvas({
         app.stage.addChild(decorMid);
       }
 
-      // Draw path
+      // Draw path - Clash of Clans style with dotted path
       const pathContainer = new Container();
       const pathPoints = (
         dynamicSpec?.path?.length ? dynamicSpec.path : themeData.pathPoints
@@ -295,35 +295,65 @@ export default function GameCanvas({
       const pathGraphics = new Graphics();
       const progressGraphics = new Graphics();
 
-      // Draw path line (only connecting checkpoints, no intermediate dots)
+      // Draw dotted path connecting checkpoints (Clash of Clans style - enhanced)
       for (let i = 0; i < nodePoints.length - 1; i++) {
         const p1 = { x: nodePoints[i].x * width, y: nodePoints[i].y * height };
         const p2 = { x: nodePoints[i + 1].x * width, y: nodePoints[i + 1].y * height };
-
-        pathGraphics.moveTo(p1.x, p1.y);
-        pathGraphics.lineTo(p2.x, p2.y);
-        pathGraphics.stroke({
-          color: secondaryColor,
-          width: 6,
-          alpha: 0.4,
-        });
-
-        // Inner road lighting
-        pathGraphics.moveTo(p1.x, p1.y);
-        pathGraphics.lineTo(p2.x, p2.y);
-        pathGraphics.stroke({ color: 0xffffff, width: 2, alpha: 0.15 });
-
-        // Completed segment glow
+        
+        const dx = p2.x - p1.x;
+        const dy = p2.y - p1.y;
+        const distance = Math.sqrt(dx * dx + dy * dy);
+        const dotSpacing = 14;
+        const numDots = Math.floor(distance / dotSpacing);
+        
+        for (let j = 0; j <= numDots; j++) {
+          const t = j / numDots;
+          const x = p1.x + dx * t;
+          const y = p1.y + dy * t;
+          
+          // Draw path dots with multiple layers for depth
+          // Outer shadow
+          pathGraphics.circle(x, y + 1, 4.5);
+          pathGraphics.fill({ color: 0x000000, alpha: 0.3 });
+          
+          // Main dot with gradient effect
+          pathGraphics.circle(x, y, 4);
+          pathGraphics.fill({ color: 0xffffff, alpha: 0.85 });
+          
+          // Inner highlight
+          pathGraphics.circle(x, y - 1, 2.5);
+          pathGraphics.fill({ color: 0xffffff, alpha: 0.5 });
+          
+          // Top highlight for 3D effect
+          pathGraphics.circle(x, y - 1.5, 1.5);
+          pathGraphics.fill({ color: 0xffffff, alpha: 0.7 });
+        }
+        
+        // Completed segment - golden/orange dots with enhanced styling
         if (i < completed) {
-          progressGraphics.moveTo(p1.x, p1.y);
-          progressGraphics.lineTo(p2.x, p2.y);
-          progressGraphics.stroke({ color: primaryColor, width: 5, alpha: 0.7 });
+          for (let j = 0; j <= numDots; j++) {
+            const t = j / numDots;
+            const x = p1.x + dx * t;
+            const y = p1.y + dy * t;
+            
+            // Subtle shadow
+            progressGraphics.circle(x, y + 0.5, 4);
+            progressGraphics.fill({ color: 0x000000, alpha: 0.2 });
+            
+            // Main green dot (completed path)
+            progressGraphics.circle(x, y, 4);
+            progressGraphics.fill({ color: 0x4ade80, alpha: 1.0 });
+            
+            // Light highlight
+            progressGraphics.circle(x, y - 1, 2.5);
+            progressGraphics.fill({ color: 0x86efac, alpha: 0.7 });
+          }
         }
       }
       pathContainer.addChild(pathGraphics);
       pathContainer.addChild(progressGraphics);
 
-      // Draw checkpoints (only numbered ones, no intermediate dots)
+      // Draw checkpoints - Clash of Clans style with detailed borders
       nodePoints.forEach((point, index) => {
         const cx = point.x * width;
         const cy = point.y * height;
@@ -331,114 +361,442 @@ export default function GameCanvas({
         const isCurrent = index === completed;
         const isLocked = index > completed;
 
-        const checkpoint = new Graphics();
-
-        // Outer glow for current checkpoint
-        if (isCurrent) {
-          checkpoint.circle(cx, cy, 28);
-          checkpoint.fill({ color: accentColor, alpha: 0.3 });
-          checkpoint.circle(cx, cy, 24);
-          checkpoint.fill({ color: accentColor, alpha: 0.4 });
-        }
-
-        // Main checkpoint circle - larger and more visible
-        const circleRadius = 20;
-        checkpoint.circle(cx, cy, circleRadius);
-        if (isCompleted) {
-          checkpoint.fill(primaryColor);
-        } else if (isCurrent) {
-          checkpoint.fill(primaryColor);
-        } else {
-          checkpoint.fill({ color: 0x6b7280, alpha: 0.7 });
-        }
-
-        // Border - thicker and more visible
-        checkpoint.circle(cx, cy, circleRadius);
-        checkpoint.stroke({ 
-          color: isLocked ? 0x4b5563 : 0xffffff, 
-          width: 3, 
-          alpha: isLocked ? 0.5 : 1.0 
-        });
-
-        // White inner circle for better contrast
-        if (!isLocked) {
-          checkpoint.circle(cx, cy, circleRadius - 2);
-          checkpoint.stroke({ color: 0xffffff, width: 1, alpha: 0.3 });
-        }
-
+        const checkpoint = new Container();
+        checkpoint.position.set(cx, cy);
         checkpoint.eventMode = 'static';
         checkpoint.cursor = 'pointer';
         checkpoint.on('pointertap', () => onCheckpointClick?.(index));
-        pathContainer.addChild(checkpoint);
+        
+        const checkpointGraphics = new Graphics();
+        const circleRadius = 24;
 
-        // Checkpoint number - larger and clearer
+        // Single subtle shadow (reduced)
+        checkpointGraphics.circle(0, 2, circleRadius);
+        checkpointGraphics.fill({ color: 0x000000, alpha: 0.25 });
+
+        // Outer glow ring for current/active checkpoint (separate container for animation)
+        let currentGlowContainer: Container | null = null;
+        if (isCurrent && !isLocked) {
+          currentGlowContainer = new Container();
+          const glowGraphics = new Graphics();
+          // Multiple glow layers
+          glowGraphics.circle(0, 0, 38);
+          glowGraphics.fill({ color: accentColor, alpha: 0.15 });
+          glowGraphics.circle(0, 0, 34);
+          glowGraphics.fill({ color: accentColor, alpha: 0.25 });
+          glowGraphics.circle(0, 0, 30);
+          glowGraphics.fill({ color: accentColor, alpha: 0.35 });
+          currentGlowContainer.addChild(glowGraphics);
+          checkpoint.addChildAt(currentGlowContainer, 0); // Add behind main graphics
+          (currentGlowContainer as any)._isCurrentGlow = true;
+        }
+
+        // Main circle background - Clash of Clans style
+        if (isCompleted) {
+          // Completed: light green (Clash of Clans style)
+          checkpointGraphics.circle(0, 0, circleRadius);
+          checkpointGraphics.fill({ color: 0x4ade80, alpha: 1.0 }); // Light green
+          checkpointGraphics.circle(0, -1, circleRadius - 1);
+          checkpointGraphics.fill({ color: 0x86efac, alpha: 0.8 }); // Lighter green highlight
+        } else if (isCurrent && !isLocked) {
+          // Current: accent color
+          checkpointGraphics.circle(0, 0, circleRadius);
+          checkpointGraphics.fill({ color: accentColor, alpha: 1.0 });
+        } else {
+          // Not done: grey (Clash of Clans style)
+          checkpointGraphics.circle(0, 0, circleRadius);
+          checkpointGraphics.fill({ color: 0x6b7280, alpha: 1.0 }); // Grey base
+          checkpointGraphics.circle(0, -1, circleRadius - 1);
+          checkpointGraphics.fill({ color: 0x9ca3af, alpha: 0.6 }); // Lighter grey highlight
+        }
+
+        // Outer border - Clash of Clans style (simplified)
+        checkpointGraphics.circle(0, 0, circleRadius);
+        checkpointGraphics.stroke({ 
+          color: isCompleted ? 0xffffff : isCurrent ? 0xffffff : 0x4b5563, 
+          width: 3, 
+          alpha: 1.0 
+        });
+        
+        // Inner border for depth (subtle)
+        checkpointGraphics.circle(0, 0, circleRadius - 2);
+        checkpointGraphics.stroke({ 
+          color: isCompleted ? 0x000000 : isCurrent ? 0x000000 : 0x1f2937, 
+          width: 1, 
+          alpha: 0.3 
+        });
+
+        // Subtle top highlight (reduced)
+        if (!isCompleted) {
+          checkpointGraphics.circle(0, -circleRadius * 0.35, circleRadius * 0.4);
+          checkpointGraphics.fill({ color: 0xffffff, alpha: 0.3 });
+        }
+
+        checkpoint.addChild(checkpointGraphics);
+
+        // Checkpoint number or checkmark
+        const labelStyle = new TextStyle({
+          fontSize: isCompleted ? 20 : 18,
+          fill: isCompleted ? '#ffffff' : '#ffffff',
+          fontFamily: 'Arial, sans-serif',
+          fontWeight: 'bold',
+          dropShadow: true,
+        });
+        // Set drop shadow properties directly (Pixi.js v8 API)
+        (labelStyle as any).dropShadowColor = 0x000000;
+        (labelStyle as any).dropShadowBlur = 2;
+        (labelStyle as any).dropShadowAngle = Math.PI / 4;
+        (labelStyle as any).dropShadowDistance = 1.5;
+        
         const label = new Text({
           text: isCompleted ? '✓' : `${index + 1}`,
-          style: new TextStyle({
-            fontSize: isCompleted ? 18 : 16,
-            fill: isCompleted ? '#ffffff' : isLocked ? '#9ca3af' : '#ffffff',
+          style: labelStyle,
+        });
+        label.anchor.set(0.5);
+        label.position.set(0, 0);
+        checkpoint.addChild(label);
+
+        // Checkpoint title (Clash of Clans style)
+        const checkpointItem = checklistItems[index];
+        if (checkpointItem && checkpointItem.title) {
+          const titleStyle = new TextStyle({
+            fontSize: 11,
+            fill: isCompleted ? '#86efac' : isCurrent ? '#ffffff' : '#9ca3af',
             fontFamily: 'Arial, sans-serif',
             fontWeight: 'bold',
             dropShadow: true,
-          }),
-        });
-        label.anchor.set(0.5);
-        label.position.set(cx, cy);
-        pathContainer.addChild(label);
+          });
+          (titleStyle as any).dropShadowColor = 0x000000;
+          (titleStyle as any).dropShadowBlur = 2;
+          (titleStyle as any).dropShadowDistance = 1;
+          
+          // Truncate long titles
+          let titleText = checkpointItem.title;
+          if (titleText.length > 20) {
+            titleText = titleText.substring(0, 17) + '...';
+          }
+          
+          const title = new Text({
+            text: titleText,
+            style: titleStyle,
+          });
+          title.anchor.set(0.5);
+          title.position.set(0, circleRadius + 16);
+          checkpoint.addChild(title);
+        }
+
+        // No stars - cleaner design like Clash of Clans
+
+        pathContainer.addChild(checkpoint);
+        
+        // Store reference to current checkpoint for animation
+        if (isCurrent && !isLocked && currentGlowContainer) {
+          (checkpoint as any)._isCurrent = true;
+          (checkpoint as any)._glowContainer = currentGlowContainer;
+        }
       });
 
       app.stage.addChild(pathContainer);
       app.stage.addChild(decorFront);
 
-      // Player character (cute 2D character with subtle breathing motion)
+      // Player character - detailed animated character
       const player = new Container();
 
+      // Shadow with blur effect
       const playerShadow = new Graphics();
-      playerShadow.ellipse(0, 0, 11, 5.5);
-      playerShadow.fill({ color: 0x000000, alpha: 0.28 });
-      playerShadow.position.set(0, 18);
+      playerShadow.ellipse(0, 0, 14, 7);
+      playerShadow.fill({ color: 0x000000, alpha: 0.35 });
+      playerShadow.ellipse(0, 0, 12, 6);
+      playerShadow.fill({ color: 0x000000, alpha: 0.2 });
+      playerShadow.position.set(0, 22);
       player.addChild(playerShadow);
 
-      const backpack = new Graphics();
-      backpack.roundRect(-11, -7, 8, 14, 3);
-      backpack.fill(0x4f46e5);
-      backpack.roundRect(-10, -6, 6, 5, 2);
-      backpack.fill({ color: 0xffffff, alpha: 0.25 });
-      player.addChild(backpack);
+      // Legs
+      const leftLeg = new Graphics();
+      leftLeg.roundRect(-6, 8, 5, 12, 2);
+      leftLeg.fill(0x2563eb);
+      leftLeg.roundRect(-5.5, 8, 4, 3, 1.5);
+      leftLeg.fill({ color: 0x1e40af, alpha: 0.6 });
+      player.addChild(leftLeg);
 
+      const rightLeg = new Graphics();
+      rightLeg.roundRect(1, 8, 5, 12, 2);
+      rightLeg.fill(0x2563eb);
+      rightLeg.roundRect(1.5, 8, 4, 3, 1.5);
+      rightLeg.fill({ color: 0x1e40af, alpha: 0.6 });
+      player.addChild(rightLeg);
+
+      // Feet
+      const leftFoot = new Graphics();
+      leftFoot.roundRect(-7, 19, 6, 3, 1);
+      leftFoot.fill(0x1e293b);
+      player.addChild(leftFoot);
+
+      const rightFoot = new Graphics();
+      rightFoot.roundRect(1, 19, 6, 3, 1);
+      rightFoot.fill(0x1e293b);
+      player.addChild(rightFoot);
+
+      // Torso/body with shirt
       const torso = new Graphics();
-      torso.roundRect(-8, -6, 16, 18, 7);
-      torso.fill(0x38bdf8);
-      torso.roundRect(-6, -4, 12, 4, 2);
-      torso.fill({ color: 0xffffff, alpha: 0.35 });
+      torso.roundRect(-9, -4, 18, 20, 8);
+      torso.fill(0x3b82f6);
+      // Shirt detail
+      torso.roundRect(-7, -2, 14, 6, 3);
+      torso.fill({ color: 0x2563eb, alpha: 0.8 });
+      // Belt
+      torso.roundRect(-8, 8, 16, 3, 1);
+      torso.fill(0x1e293b);
       player.addChild(torso);
 
+      // Arms
+      const leftArm = new Graphics();
+      leftArm.roundRect(-12, 0, 5, 14, 3);
+      leftArm.fill(0xfec89a);
+      leftArm.roundRect(-11.5, 0, 4, 4, 2);
+      leftArm.fill({ color: 0xfdb68a, alpha: 0.7 });
+      player.addChild(leftArm);
+
+      const rightArm = new Graphics();
+      rightArm.roundRect(7, 0, 5, 14, 3);
+      rightArm.fill(0xfec89a);
+      rightArm.roundRect(7.5, 0, 4, 4, 2);
+      rightArm.fill({ color: 0xfdb68a, alpha: 0.7 });
+      player.addChild(rightArm);
+
+      // Hands
+      const leftHand = new Graphics();
+      leftHand.circle(-9.5, 13, 3.5);
+      leftHand.fill(0xfec89a);
+      player.addChild(leftHand);
+
+      const rightHand = new Graphics();
+      rightHand.circle(9.5, 13, 3.5);
+      rightHand.fill(0xfec89a);
+      player.addChild(rightHand);
+
+      // Head
       const head = new Graphics();
-      head.circle(0, -16, 8);
+      head.circle(0, -18, 10);
       head.fill(0xfec89a);
-      head.circle(-2.5, -17, 0.9);
-      head.circle(2.5, -17, 0.9);
-      head.fill(0x1f2937);
-      head.ellipse(0, -13.5, 2.4, 1.2);
-      head.fill({ color: 0xef4444, alpha: 0.45 });
+      // Face shading
+      head.circle(0, -16, 8);
+      head.fill({ color: 0xfdb68a, alpha: 0.3 });
       player.addChild(head);
 
+      // Eyes
+      const leftEye = new Graphics();
+      leftEye.circle(-3, -19, 1.8);
+      leftEye.fill(0x1f2937);
+      leftEye.circle(-2.8, -19.3, 0.6);
+      leftEye.fill(0xffffff);
+      player.addChild(leftEye);
+
+      const rightEye = new Graphics();
+      rightEye.circle(3, -19, 1.8);
+      rightEye.fill(0x1f2937);
+      rightEye.circle(2.8, -19.3, 0.6);
+      rightEye.fill(0xffffff);
+      player.addChild(rightEye);
+
+      // Nose
+      const nose = new Graphics();
+      nose.ellipse(0, -16, 1, 1.5);
+      nose.fill({ color: 0xfdb68a, alpha: 0.5 });
+      player.addChild(nose);
+
+      // Mouth
+      const mouth = new Graphics();
+      mouth.ellipse(0, -13.5, 2.5, 1.2);
+      mouth.fill({ color: 0xef4444, alpha: 0.6 });
+      player.addChild(mouth);
+
+      // Hair
       const hair = new Graphics();
-      hair.ellipse(0, -20.5, 7.5, 3.2);
-      hair.fill(0x334155);
+      hair.ellipse(0, -24, 9, 4.5);
+      hair.fill(0x1e293b);
+      hair.ellipse(-3, -25, 4, 3);
+      hair.fill(0x1e293b);
+      hair.ellipse(3, -25, 4, 3);
+      hair.fill(0x1e293b);
       player.addChild(hair);
 
-      const playerBadge = new Text({
-        text: dynamicSpec?.character?.skin?.includes('medic') ? '🧪' : '🧭',
+      // Backpack
+      const backpack = new Graphics();
+      backpack.roundRect(-10, -2, 7, 12, 3);
+      backpack.fill(0x4f46e5);
+      backpack.roundRect(-9, -1, 5, 4, 2);
+      backpack.fill({ color: 0x6366f1, alpha: 0.8 });
+      backpack.roundRect(-8.5, 6, 4, 2, 1);
+      backpack.fill(0x1e293b);
+      player.addChild(backpack);
+
+      // Badge/emblem on chest
+      const badge = new Graphics();
+      badge.circle(0, 2, 4);
+      badge.fill(0xffd700);
+      badge.circle(0, 2, 3);
+      badge.fill(0xffed4e);
+      player.addChild(badge);
+
+      const badgeIcon = new Text({
+        text: dynamicSpec?.character?.skin?.includes('medic') ? '⚕' : '⭐',
         style: new TextStyle({
-          fontSize: 11,
+          fontSize: 8,
           fontFamily: 'Arial',
         }),
       });
-      playerBadge.anchor.set(0.5);
-      playerBadge.position.set(0, -31);
-      player.addChild(playerBadge);
+      badgeIcon.anchor.set(0.5);
+      badgeIcon.position.set(0, 2);
+      player.addChild(badgeIcon);
+
       app.stage.addChild(player);
+
+      // Doctor consultant character (always on right middle)
+      const doctor = new Container();
+      const doctorX = width * 0.85;
+      const doctorY = height * 0.5;
+      doctor.eventMode = 'static';
+      doctor.cursor = 'pointer';
+      doctor.on('pointertap', () => {
+        // Will be handled by parent component
+        (window as any).__openDoctorChat?.();
+      });
+
+      // Doctor shadow
+      const doctorShadow = new Graphics();
+      doctorShadow.ellipse(0, 0, 16, 8);
+      doctorShadow.fill({ color: 0x000000, alpha: 0.3 });
+      doctorShadow.position.set(0, 28);
+      doctor.addChild(doctorShadow);
+
+      // Doctor body (white coat)
+      const doctorBody = new Graphics();
+      doctorBody.roundRect(-12, -8, 24, 28, 6);
+      doctorBody.fill(0xffffff);
+      doctorBody.roundRect(-10, -6, 20, 6, 3);
+      doctorBody.fill({ color: 0xf3f4f6, alpha: 0.8 });
+      doctor.addChild(doctorBody);
+
+      // Doctor legs
+      const doctorLeftLeg = new Graphics();
+      doctorLeftLeg.roundRect(-8, 18, 6, 10, 2);
+      doctorLeftLeg.fill(0x1e293b);
+      doctor.addChild(doctorLeftLeg);
+
+      const doctorRightLeg = new Graphics();
+      doctorRightLeg.roundRect(2, 18, 6, 10, 2);
+      doctorRightLeg.fill(0x1e293b);
+      doctor.addChild(doctorRightLeg);
+
+      // Doctor arms
+      const doctorLeftArm = new Graphics();
+      doctorLeftArm.roundRect(-14, -4, 5, 16, 3);
+      doctorLeftArm.fill(0xfec89a);
+      doctor.addChild(doctorLeftArm);
+
+      const doctorRightArm = new Graphics();
+      doctorRightArm.roundRect(9, -4, 5, 16, 3);
+      doctorRightArm.fill(0xfec89a);
+      doctor.addChild(doctorRightArm);
+
+      // Doctor head (wise old man)
+      const doctorHead = new Graphics();
+      doctorHead.circle(0, -22, 11);
+      doctorHead.fill(0xfdb68a);
+      doctor.addChild(doctorHead);
+
+      // Beard
+      const beard = new Graphics();
+      beard.ellipse(0, -18, 8, 6);
+      beard.fill(0xd1d5db);
+      beard.ellipse(0, -16, 7, 5);
+      beard.fill(0x9ca3af);
+      doctor.addChild(beard);
+
+      // Mustache
+      const mustache = new Graphics();
+      mustache.ellipse(-3, -20, 3, 2);
+      mustache.fill(0xd1d5db);
+      mustache.ellipse(3, -20, 3, 2);
+      mustache.fill(0xd1d5db);
+      doctor.addChild(mustache);
+
+      // Glasses
+      const leftGlass = new Graphics();
+      leftGlass.circle(-4, -22, 3.5);
+      leftGlass.stroke({ color: 0x1f2937, width: 1.5 });
+      doctor.addChild(leftGlass);
+
+      const rightGlass = new Graphics();
+      rightGlass.circle(4, -22, 3.5);
+      rightGlass.stroke({ color: 0x1f2937, width: 1.5 });
+      doctor.addChild(rightGlass);
+
+      const glassBridge = new Graphics();
+      glassBridge.roundRect(-1.5, -22, 3, 1, 0.5);
+      glassBridge.fill(0x1f2937);
+      doctor.addChild(glassBridge);
+
+      // Stethoscope
+      const stethoscope = new Graphics();
+      stethoscope.roundRect(-2, 4, 4, 12, 2);
+      stethoscope.stroke({ color: 0x3b82f6, width: 2 });
+      stethoscope.circle(0, 16, 3);
+      stethoscope.stroke({ color: 0x3b82f6, width: 2 });
+      doctor.addChild(stethoscope);
+
+      // Doctor badge/name tag
+      const doctorBadge = new Graphics();
+      doctorBadge.roundRect(-6, -2, 12, 4, 1);
+      doctorBadge.fill(0x3b82f6);
+      doctor.addChild(doctorBadge);
+
+      const doctorBadgeText = new Text({
+        text: 'DR',
+        style: new TextStyle({
+          fontSize: 7,
+          fill: '#ffffff',
+          fontFamily: 'Arial',
+          fontWeight: 'bold',
+        }),
+      });
+      doctorBadgeText.anchor.set(0.5);
+      doctorBadgeText.position.set(0, 0);
+      doctor.addChild(doctorBadgeText);
+
+      // Pulse indicator (subtle animation)
+      const pulseIndicator = new Graphics();
+      pulseIndicator.circle(0, 18, 2);
+      pulseIndicator.fill({ color: 0xef4444, alpha: 0.8 });
+      doctor.addChild(pulseIndicator);
+
+      // Clickable indicator glow
+      const clickableGlow = new Graphics();
+      clickableGlow.circle(0, 0, 35);
+      clickableGlow.fill({ color: 0x3b82f6, alpha: 0.15 });
+      clickableGlow.circle(0, 0, 30);
+      clickableGlow.fill({ color: 0x3b82f6, alpha: 0.1 });
+      doctor.addChildAt(clickableGlow, 0); // Add behind everything
+
+      // "Tap to chat" text hint
+      const chatHint = new Text({
+        text: '💬',
+        style: new TextStyle({
+          fontSize: 16,
+          fontFamily: 'Arial',
+        }),
+      });
+      chatHint.anchor.set(0.5);
+      chatHint.position.set(0, -35);
+      doctor.addChild(chatHint);
+
+      // Add doctor to a separate container so it's always on top
+      const doctorContainer = new Container();
+      doctorContainer.position.set(doctorX, doctorY);
+      doctorContainer.addChild(doctor);
+      doctorContainer.zIndex = 1000; // Ensure doctor is always visible
+      app.stage.addChild(doctorContainer);
 
       const currentIdx = Math.max(0, Math.min(completed, nodePoints.length - 1));
       const currentNode = nodePoints[currentIdx] || nodePoints[0];
@@ -448,6 +806,19 @@ export default function GameCanvas({
       let y = targetY;
 
       player.position.set(x, y);
+      
+      // Store references for animation
+      const playerParts = {
+        torso,
+        head,
+        hair,
+        leftLeg,
+        rightLeg,
+        leftFoot,
+        rightFoot,
+        leftArm,
+        rightArm,
+      };
 
       // Animated particles (only if no image background to avoid visual clutter)
       let particleContainer: Container | null = null;
@@ -478,12 +849,54 @@ export default function GameCanvas({
         y += (targetY - y) * 0.11;
         const bob = Math.sin(tick * 3.2) * 2.2;
         const breathe = Math.sin(tick * 2.1);
+        const walk = Math.sin(tick * 4.5);
+        
+        // Player position and animation
         player.position.set(x, y + bob);
         player.rotation = Math.sin(tick * 1.2) * 0.02;
-        torso.scale.y = 1 + breathe * 0.035;
-        torso.scale.x = 1 - breathe * 0.015;
-        head.y = breathe * 0.7;
-        hair.y = breathe * 0.55;
+        
+        // Breathing animation for torso
+        playerParts.torso.scale.y = 1 + breathe * 0.03;
+        playerParts.torso.scale.x = 1 - breathe * 0.01;
+        
+        // Head bobbing
+        playerParts.head.y = -18 + breathe * 0.6;
+        playerParts.hair.y = -24 + breathe * 0.5;
+        
+        // Walking animation for legs
+        playerParts.leftLeg.rotation = walk * 0.15;
+        playerParts.rightLeg.rotation = -walk * 0.15;
+        playerParts.leftFoot.rotation = walk * 0.1;
+        playerParts.rightFoot.rotation = -walk * 0.1;
+        
+        // Arm swing
+        playerParts.leftArm.rotation = -walk * 0.2;
+        playerParts.rightArm.rotation = walk * 0.2;
+        
+        // Doctor animation (subtle idle)
+        const doctorBreathe = Math.sin(tick * 1.8);
+        doctorContainer.position.y = doctorY + doctorBreathe * 1.5;
+        doctor.rotation = Math.sin(tick * 0.8) * 0.01;
+        
+        // Pulse indicator animation
+        const pulse = Math.sin(tick * 6) * 0.5 + 0.5;
+        pulseIndicator.scale.set(1 + pulse * 0.3);
+        pulseIndicator.alpha = 0.6 + pulse * 0.4;
+        
+        // Clickable glow pulse
+        const glowPulse = Math.sin(tick * 3) * 0.5 + 0.5;
+        clickableGlow.alpha = 0.1 + glowPulse * 0.1;
+        clickableGlow.scale.set(1 + glowPulse * 0.1);
+        
+        // Animate current checkpoint glow
+        pathContainer.children.forEach((child: any) => {
+          if (child._isCurrent && child._glowContainer) {
+            const pulse = Math.sin(tick * 4) * 0.5 + 0.5;
+            child.scale.set(1 + pulse * 0.03);
+            child._glowContainer.scale.set(1 + pulse * 0.15);
+            child._glowContainer.alpha = 0.6 + pulse * 0.4;
+          }
+        });
 
         if (parallaxContainer) {
           parallaxContainer.children.forEach((silhouette: any, idx) => {

@@ -148,7 +148,7 @@ interface GameStore {
   logout: () => void;
   loadProfile: () => Promise<void>;
   loadProgress: () => Promise<void>;
-  loadChecklist: () => Promise<void>;
+  loadChecklist: (consultationId?: string) => Promise<void>;
   completeItem: (itemId: string) => Promise<RewardPopup | null>;
   dismissReward: () => void;
   loadLeaderboard: () => Promise<void>;
@@ -213,14 +213,23 @@ export const useGameStore = create<GameStore>((set, get) => ({
     }
   },
 
-  loadChecklist: async () => {
+  loadChecklist: async (consultationId?: string) => {
     try {
       set({ isLoading: true });
-      const res = await checklistApi.getAll();
-      set({ checklist: res.data.items, isLoading: false });
+      let res;
+      if (consultationId) {
+        // Load items for specific consultation
+        res = await checklistApi.getByConsultation(consultationId);
+        console.log(`Loaded ${res.data.items?.length || 0} checklist items for consultation ${consultationId}`);
+      } else {
+        // Load all items for user
+        res = await checklistApi.getAll();
+        console.log(`Loaded ${res.data.items?.length || 0} checklist items for user`);
+      }
+      set({ checklist: res.data.items || [], isLoading: false });
     } catch (error) {
       console.error('Failed to load checklist:', error);
-      set({ isLoading: false });
+      set({ isLoading: false, checklist: [] });
     }
   },
 
@@ -287,13 +296,14 @@ export const useGameStore = create<GameStore>((set, get) => ({
   loadCurrentMap: async () => {
     try {
       const res = await gameApi.getCurrentMap();
+      const consultationId = res.data.consultationId;
       set({
         mapSpec: res.data.mapSpec,
         mapSpecSource: res.data.source || null,
         mapValidationWarnings: res.data.validation?.warnings || [],
         mapImageUrl: res.data.mapImageUrl || null,
         currentMapInfo: {
-          consultationId: res.data.consultationId,
+          consultationId: consultationId,
           consultationTitle: res.data.consultationTitle || 'My Consultation',
           mapIndex: res.data.mapIndex || 0,
           startStepIndex: res.data.startStepIndex || 0,
@@ -301,6 +311,10 @@ export const useGameStore = create<GameStore>((set, get) => ({
           totalSteps: res.data.totalSteps || 0,
         },
       });
+      // Reload checklist items for this consultation to ensure we have the latest
+      if (consultationId) {
+        await get().loadChecklist(consultationId);
+      }
     } catch (error) {
       console.error('Failed to load current map:', error);
     }
@@ -323,6 +337,8 @@ export const useGameStore = create<GameStore>((set, get) => ({
           totalSteps: res.data.totalSteps || 0,
         },
       });
+      // Reload checklist items for this consultation to ensure we have the latest
+      await get().loadChecklist(consultationId);
     } catch (error) {
       console.error('Failed to load map:', error);
     }
