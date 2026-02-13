@@ -22,7 +22,7 @@ interface PendingUpload {
 
 export default function UploadPage() {
   const router = useRouter();
-  const { isAuthenticated, initFromStorage, loadChecklist, loadProgress } = useGameStore();
+  const { isAuthenticated, initFromStorage, loadChecklist, loadProgress, loadConsultationsWithMaps } = useGameStore();
   const [step, setStep] = useState<'select' | 'input' | 'processing' | 'done'>('select');
   const [selectedTypes, setSelectedTypes] = useState<Set<UploadType>>(new Set());
   const [currentType, setCurrentType] = useState<UploadType | null>(null);
@@ -128,11 +128,17 @@ export default function UploadPage() {
       setProcessingStep('Done! Your quests are ready!');
       await new Promise((r) => setTimeout(r, 500));
 
-      // Reload checklist and progress
+      // Reload checklist, progress, and consultations
       await loadChecklist();
       await loadProgress();
+      await loadConsultationsWithMaps();
 
       setStep('done');
+      
+      // Redirect to consultations page after a short delay
+      setTimeout(() => {
+        router.push('/consultations');
+      }, 1500);
     } catch (error) {
       console.error('Processing failed:', error);
       setProcessingStep('Processing failed. Please try again.');

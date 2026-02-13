@@ -297,26 +297,27 @@ export const useGameStore = create<GameStore>((set, get) => ({
     try {
       const res = await gameApi.getCurrentMap();
       const consultationId = res.data.consultationId;
-      set({
-        mapSpec: res.data.mapSpec,
-        mapSpecSource: res.data.source || null,
-        mapValidationWarnings: res.data.validation?.warnings || [],
-        mapImageUrl: res.data.mapImageUrl || null,
-        currentMapInfo: {
-          consultationId: consultationId,
-          consultationTitle: res.data.consultationTitle || 'My Consultation',
-          mapIndex: res.data.mapIndex || 0,
-          startStepIndex: res.data.startStepIndex || 0,
-          endStepIndex: res.data.endStepIndex || 0,
-          totalSteps: res.data.totalSteps || 0,
-        },
-      });
-      // Reload checklist items for this consultation to ensure we have the latest
       if (consultationId) {
+        set({
+          mapSpec: res.data.mapSpec,
+          mapSpecSource: res.data.source || null,
+          mapValidationWarnings: res.data.validation?.warnings || [],
+          mapImageUrl: res.data.mapImageUrl || null,
+          currentMapInfo: {
+            consultationId: consultationId,
+            consultationTitle: res.data.consultationTitle || 'My Consultation',
+            mapIndex: res.data.mapIndex || 0,
+            startStepIndex: res.data.startStepIndex || 0,
+            endStepIndex: res.data.endStepIndex || 0,
+            totalSteps: res.data.totalSteps || 0,
+          },
+        });
+        // Reload checklist items for this consultation to ensure we have the latest
         await get().loadChecklist(consultationId);
       }
     } catch (error) {
-      console.error('Failed to load current map:', error);
+      // No current map is fine - user needs to select a consultation
+      console.log('No current map loaded, user needs to select a consultation');
     }
   },
 
