@@ -1,6 +1,17 @@
 'use client';
 import { useEffect, useRef, useCallback } from 'react';
-import { Application, Graphics, Container, Text, TextStyle, Sprite, Assets } from 'pixi.js';
+import {
+  Application,
+  Graphics,
+  Container,
+  Text,
+  TextStyle,
+  Sprite,
+  Assets,
+  ColorMatrixFilter,
+  AnimatedSprite,
+  Texture,
+} from 'pixi.js';
 import { getTheme, GameTheme } from './themes';
 import type { PersonalizedMapSpec } from '@/stores/gameStore';
 
@@ -129,6 +140,72 @@ export default function GameCanvas({
     g.ellipse(cx, cy, baseSize * 0.42, baseSize * 0.24);
     g.fill(color);
   };
+
+  const loadAnimationFrames = useCallback(
+    async (characterId: 'player' | 'doctor', animation: 'walk' | 'idle') => {
+      const base = `/characters/${characterId}`;
+
+      // 0) Try clean single-file vector assets first.
+      // We intentionally avoid raw PNG skin atlases here because they are UV maps,
+      // not character sprites, and render as blocky texture sheets.
+      const directCandidates = [`${base}/${animation}.svg`, `${base}/idle.svg`];
+      for (const candidate of directCandidates) {
+        try {
+          const tex = await Assets.load(candidate);
+          return [tex as Texture];
+        } catch {
+          // Ignore and continue
+        }
+      }
+
+      // 1) Try spritesheet JSON first (best pipeline for real game assets)
+      const jsonCandidates = [
+        `${base}/${animation}.json`,
+        `${base}/character.json`,
+        `${base}/atlas.json`,
+      ];
+      for (const candidate of jsonCandidates) {
+        try {
+          const sheet: any = await Assets.load(candidate);
+          if (sheet?.animations && Object.keys(sheet.animations).length > 0) {
+            const frames =
+              sheet.animations[animation] ||
+              sheet.animations.walk ||
+              sheet.animations.idle ||
+              sheet.animations[Object.keys(sheet.animations)[0]];
+            if (Array.isArray(frames) && frames.length > 0) {
+              return frames as Texture[];
+            }
+          }
+        } catch {
+          // Ignore and try next candidate
+        }
+      }
+
+      // 2) Try numbered frame files
+      const numberedPatterns = [
+        `${base}/${animation}/frame_`,
+        `${base}/${animation}_`,
+        `${base}/${animation}`,
+      ];
+      for (const pattern of numberedPatterns) {
+        const frames: Texture[] = [];
+        for (let i = 0; i < 24; i += 1) {
+          const url = `${pattern}${i}.png`;
+          try {
+            const frame = await Assets.load(url);
+            frames.push(frame as Texture);
+          } catch {
+            break;
+          }
+        }
+        if (frames.length >= 2) return frames;
+      }
+
+      return null;
+    },
+    []
+  );
 
   const drawMap = useCallback(
     async (
@@ -353,7 +430,15 @@ export default function GameCanvas({
       pathContainer.addChild(pathGraphics);
       pathContainer.addChild(progressGraphics);
 
-      // Draw checkpoints - Clash of Clans style with detailed borders
+      // Draw checkpoints using star icon image
+      let starIconTexture: any = null;
+      try {
+        // Load star icon image
+        starIconTexture = await Assets.load('/star_icon.png');
+      } catch (error) {
+        console.warn('Failed to load star_icon.png, using fallback rendering:', error);
+      }
+
       nodePoints.forEach((point, index) => {
         const cx = point.x * width;
         const cy = point.y * height;
@@ -366,95 +451,76 @@ export default function GameCanvas({
         checkpoint.eventMode = 'static';
         checkpoint.cursor = 'pointer';
         checkpoint.on('pointertap', () => onCheckpointClick?.(index));
-        
-        const checkpointGraphics = new Graphics();
-        const circleRadius = 24;
 
-        // Single subtle shadow (reduced)
-        checkpointGraphics.circle(0, 2, circleRadius);
-        checkpointGraphics.fill({ color: 0x000000, alpha: 0.25 });
+        // Smooth shadow under the icon (multiple layers for smoothness)
+        const shadowGraphics = new Graphics();
+        // Outer shadow (soft, large) - scaled up for bigger icon
+        shadowGraphics.circle(0, 3, 48);
+        shadowGraphics.fill({ color: 0x000000, alpha: 0.15 });
+        // Middle shadow
+        shadowGraphics.circle(0, 2.5, 42);
+        shadowGraphics.fill({ color: 0x000000, alpha: 0.25 });
+        // Inner shadow (sharp, close)
+        shadowGraphics.circle(0, 2, 36);
+        shadowGraphics.fill({ color: 0x000000, alpha: 0.35 });
+        checkpoint.addChild(shadowGraphics);
 
         // Outer glow ring for current/active checkpoint (separate container for animation)
         let currentGlowContainer: Container | null = null;
         if (isCurrent && !isLocked) {
           currentGlowContainer = new Container();
           const glowGraphics = new Graphics();
-          // Multiple glow layers
-          glowGraphics.circle(0, 0, 38);
-          glowGraphics.fill({ color: accentColor, alpha: 0.15 });
-          glowGraphics.circle(0, 0, 34);
-          glowGraphics.fill({ color: accentColor, alpha: 0.25 });
-          glowGraphics.circle(0, 0, 30);
-          glowGraphics.fill({ color: accentColor, alpha: 0.35 });
+          const goldenOrangeGlow = 0xFF8C42; // Match the golden-orange coin color
+          // Multiple glow layers with golden-orange (scaled up for bigger icon)
+          glowGraphics.circle(0, 0, 57);
+          glowGraphics.fill({ color: goldenOrangeGlow, alpha: 0.15 });
+          glowGraphics.circle(0, 0, 51);
+          glowGraphics.fill({ color: goldenOrangeGlow, alpha: 0.25 });
+          glowGraphics.circle(0, 0, 45);
+          glowGraphics.fill({ color: goldenOrangeGlow, alpha: 0.35 });
           currentGlowContainer.addChild(glowGraphics);
           checkpoint.addChildAt(currentGlowContainer, 0); // Add behind main graphics
           (currentGlowContainer as any)._isCurrentGlow = true;
         }
 
-        // Main circle background - Clash of Clans style
-        if (isCompleted) {
-          // Completed: light green (Clash of Clans style)
-          checkpointGraphics.circle(0, 0, circleRadius);
-          checkpointGraphics.fill({ color: 0x4ade80, alpha: 1.0 }); // Light green
-          checkpointGraphics.circle(0, -1, circleRadius - 1);
-          checkpointGraphics.fill({ color: 0x86efac, alpha: 0.8 }); // Lighter green highlight
-        } else if (isCurrent && !isLocked) {
-          // Current: accent color
-          checkpointGraphics.circle(0, 0, circleRadius);
-          checkpointGraphics.fill({ color: accentColor, alpha: 1.0 });
+        // Icon size constant for positioning
+        const iconSize = 36; // Approximate size of the icon after scaling (increased from 24)
+        
+        // Use star icon sprite if available
+        if (starIconTexture) {
+          const starSprite = new Sprite(starIconTexture);
+          starSprite.anchor.set(0.5);
+          // Scale to approximately 72px diameter (increased from 48px)
+          const targetSize = 72;
+          const textureSize = Math.max(starIconTexture.width, starIconTexture.height);
+          starSprite.scale.set(targetSize / textureSize);
+          
+          // Apply grey overlay for uncompleted tasks
+          if (!isCompleted && isLocked) {
+            // Strong grey overlay for locked/uncompleted tasks
+            const greyFilter = new ColorMatrixFilter();
+            greyFilter.greyscale(0.3, true); // Convert to greyscale with reduced brightness
+            greyFilter.brightness(0.4, false); // Make it darker
+            greyFilter.saturate(-0.8, false); // Desaturate
+            starSprite.filters = [greyFilter];
+          } else if (isCompleted) {
+            // No overlay for completed tasks - keep original colors
+            starSprite.filters = [];
+          } else {
+            // Current/active checkpoint - no overlay, keep original golden-orange
+            starSprite.filters = [];
+          }
+          
+          checkpoint.addChild(starSprite);
         } else {
-          // Not done: grey (Clash of Clans style)
-          checkpointGraphics.circle(0, 0, circleRadius);
-          checkpointGraphics.fill({ color: 0x6b7280, alpha: 1.0 }); // Grey base
-          checkpointGraphics.circle(0, -1, circleRadius - 1);
-          checkpointGraphics.fill({ color: 0x9ca3af, alpha: 0.6 }); // Lighter grey highlight
+          // Fallback: draw circle if image not available
+          const checkpointGraphics = new Graphics();
+          checkpointGraphics.circle(0, 0, iconSize);
+          checkpointGraphics.fill({ color: isCompleted ? 0x4ade80 : isLocked ? 0x6b7280 : 0xFF8C42, alpha: 1.0 });
+          checkpointGraphics.circle(0, 0, iconSize);
+          checkpointGraphics.stroke({ color: 0xffffff, width: 2.5, alpha: 1.0 });
+          checkpoint.addChild(checkpointGraphics);
         }
-
-        // Outer border - Clash of Clans style (simplified)
-        checkpointGraphics.circle(0, 0, circleRadius);
-        checkpointGraphics.stroke({ 
-          color: isCompleted ? 0xffffff : isCurrent ? 0xffffff : 0x4b5563, 
-          width: 3, 
-          alpha: 1.0 
-        });
-        
-        // Inner border for depth (subtle)
-        checkpointGraphics.circle(0, 0, circleRadius - 2);
-        checkpointGraphics.stroke({ 
-          color: isCompleted ? 0x000000 : isCurrent ? 0x000000 : 0x1f2937, 
-          width: 1, 
-          alpha: 0.3 
-        });
-
-        // Subtle top highlight (reduced)
-        if (!isCompleted) {
-          checkpointGraphics.circle(0, -circleRadius * 0.35, circleRadius * 0.4);
-          checkpointGraphics.fill({ color: 0xffffff, alpha: 0.3 });
-        }
-
-        checkpoint.addChild(checkpointGraphics);
-
-        // Checkpoint number or checkmark
-        const labelStyle = new TextStyle({
-          fontSize: isCompleted ? 20 : 18,
-          fill: isCompleted ? '#ffffff' : '#ffffff',
-          fontFamily: 'Arial, sans-serif',
-          fontWeight: 'bold',
-          dropShadow: true,
-        });
-        // Set drop shadow properties directly (Pixi.js v8 API)
-        (labelStyle as any).dropShadowColor = 0x000000;
-        (labelStyle as any).dropShadowBlur = 2;
-        (labelStyle as any).dropShadowAngle = Math.PI / 4;
-        (labelStyle as any).dropShadowDistance = 1.5;
-        
-        const label = new Text({
-          text: isCompleted ? '✓' : `${index + 1}`,
-          style: labelStyle,
-        });
-        label.anchor.set(0.5);
-        label.position.set(0, 0);
-        checkpoint.addChild(label);
 
         // Checkpoint title (Clash of Clans style)
         const checkpointItem = checklistItems[index];
@@ -481,7 +547,7 @@ export default function GameCanvas({
             style: titleStyle,
           });
           title.anchor.set(0.5);
-          title.position.set(0, circleRadius + 16);
+          title.position.set(0, iconSize + 16);
           checkpoint.addChild(title);
         }
 
@@ -501,6 +567,10 @@ export default function GameCanvas({
 
       // Player character - detailed animated character
       const player = new Container();
+      // Scale up the entire player character (1.5x bigger)
+      const playerScale = 1.5;
+      player.scale.set(playerScale);
+      let playerSprite: AnimatedSprite | null = null;
 
       // Shadow with blur effect
       const playerShadow = new Graphics();
@@ -650,6 +720,28 @@ export default function GameCanvas({
       badgeIcon.position.set(0, 2);
       player.addChild(badgeIcon);
 
+      // Replace the procedural player with a higher-quality asset character when available.
+      const playerFrames = await loadAnimationFrames('player', 'walk');
+      if (playerFrames && playerFrames.length > 0) {
+        player.removeChildren();
+
+        const playerShadow = new Graphics();
+        playerShadow.ellipse(0, 0, 18, 8);
+        playerShadow.fill({ color: 0x000000, alpha: 0.28 });
+        playerShadow.position.set(0, 26);
+        player.addChild(playerShadow);
+
+        playerSprite = new AnimatedSprite(playerFrames);
+        playerSprite.anchor.set(0.5, 0.88);
+        const sourceHeight = Math.max(playerFrames[0].height || 1, 1);
+        const targetHeight = 92;
+        const spriteScale = targetHeight / sourceHeight;
+        playerSprite.scale.set(spriteScale);
+        playerSprite.animationSpeed = playerFrames.length > 1 ? 0.18 : 0;
+        if (playerFrames.length > 1) playerSprite.play();
+        player.addChild(playerSprite);
+      }
+
       app.stage.addChild(player);
 
       // Doctor consultant character (always on right middle)
@@ -662,6 +754,8 @@ export default function GameCanvas({
         // Will be handled by parent component
         (window as any).__openDoctorChat?.();
       });
+      let pulseIndicator: Graphics;
+      let clickableGlow: Graphics;
 
       // Doctor shadow
       const doctorShadow = new Graphics();
@@ -766,13 +860,13 @@ export default function GameCanvas({
       doctor.addChild(doctorBadgeText);
 
       // Pulse indicator (subtle animation)
-      const pulseIndicator = new Graphics();
+      pulseIndicator = new Graphics();
       pulseIndicator.circle(0, 18, 2);
       pulseIndicator.fill({ color: 0xef4444, alpha: 0.8 });
       doctor.addChild(pulseIndicator);
 
       // Clickable indicator glow
-      const clickableGlow = new Graphics();
+      clickableGlow = new Graphics();
       clickableGlow.circle(0, 0, 35);
       clickableGlow.fill({ color: 0x3b82f6, alpha: 0.15 });
       clickableGlow.circle(0, 0, 30);
@@ -791,6 +885,51 @@ export default function GameCanvas({
       chatHint.position.set(0, -35);
       doctor.addChild(chatHint);
 
+      // Replace procedural doctor with asset character when available.
+      const doctorFrames = await loadAnimationFrames('doctor', 'idle');
+      if (doctorFrames && doctorFrames.length > 0) {
+        doctor.removeChildren();
+
+        clickableGlow = new Graphics();
+        clickableGlow.circle(0, 0, 40);
+        clickableGlow.fill({ color: 0x3b82f6, alpha: 0.13 });
+        clickableGlow.circle(0, 0, 34);
+        clickableGlow.fill({ color: 0x3b82f6, alpha: 0.08 });
+        doctor.addChild(clickableGlow);
+
+        const doctorShadow = new Graphics();
+        doctorShadow.ellipse(0, 0, 18, 8);
+        doctorShadow.fill({ color: 0x000000, alpha: 0.28 });
+        doctorShadow.position.set(0, 28);
+        doctor.addChild(doctorShadow);
+
+        const doctorSprite = new AnimatedSprite(doctorFrames);
+        doctorSprite.anchor.set(0.5, 0.9);
+        const sourceHeight = Math.max(doctorFrames[0].height || 1, 1);
+        const targetHeight = 96;
+        const spriteScale = targetHeight / sourceHeight;
+        doctorSprite.scale.set(spriteScale);
+        doctorSprite.animationSpeed = doctorFrames.length > 1 ? 0.12 : 0;
+        if (doctorFrames.length > 1) doctorSprite.play();
+        doctor.addChild(doctorSprite);
+
+        pulseIndicator = new Graphics();
+        pulseIndicator.circle(0, 20, 2.2);
+        pulseIndicator.fill({ color: 0xef4444, alpha: 0.8 });
+        doctor.addChild(pulseIndicator);
+
+        const doctorHint = new Text({
+          text: '💬',
+          style: new TextStyle({
+            fontSize: 16,
+            fontFamily: 'Arial',
+          }),
+        });
+        doctorHint.anchor.set(0.5);
+        doctorHint.position.set(0, -42);
+        doctor.addChild(doctorHint);
+      }
+
       // Add doctor to a separate container so it's always on top
       const doctorContainer = new Container();
       doctorContainer.position.set(doctorX, doctorY);
@@ -800,7 +939,10 @@ export default function GameCanvas({
 
       const currentIdx = Math.max(0, Math.min(completed, nodePoints.length - 1));
       const currentNode = nodePoints[currentIdx] || nodePoints[0];
-      let targetX = currentNode.x * width;
+      // Position player next to the star icon (to the left), not on top of it
+      // Increased offset for bigger star icon
+      const playerOffsetX = -50; // Offset to the left of the checkpoint (increased from -35)
+      let targetX = currentNode.x * width + playerOffsetX;
       let targetY = currentNode.y * height - 24;
       let x = targetX;
       let y = targetY;
@@ -843,7 +985,8 @@ export default function GameCanvas({
       app.ticker.add(() => {
         tick += 0.03;
         const liveCurrent = nodePoints[Math.max(0, Math.min(completed, nodePoints.length - 1))];
-        targetX = (liveCurrent?.x || 0.1) * width;
+        const playerOffsetX = -50; // Offset to the left of the checkpoint (increased from -35)
+        targetX = (liveCurrent?.x || 0.1) * width + playerOffsetX;
         targetY = (liveCurrent?.y || 0.8) * height - 24;
         x += (targetX - x) * 0.11;
         y += (targetY - y) * 0.11;

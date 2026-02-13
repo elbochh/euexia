@@ -1,0 +1,1 @@
+Place character assets here. Supported formats:\n1) Spritesheet JSON: /characters/{player|doctor}/{walk|idle}.json\n2) Numbered frames: /characters/{player|doctor}/{walk|idle}_0.png ...\n3) Numbered frames in folder: /characters/{player|doctor}/{walk|idle}/frame_0.png ...\n4) Single fallback image: /characters/{player|doctor}/{walk|idle}.png\n

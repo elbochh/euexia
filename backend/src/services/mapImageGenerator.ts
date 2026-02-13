@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { ChecklistSignals, GeneratedMapSpec, MapNode, MapPoint, MapThemeId } from './mapSpec/types';
-import { invokeImageGenerationModel, invokeImageModel, invokeTextModel } from './sagemaker';
+import { invokeImageGenerationModel, invokeTextModel } from './sagemaker';
 
 // Dynamic import for sharp to avoid issues if not available
 let sharp: any = null;
@@ -283,7 +283,8 @@ function buildImagePrompt(
   _signals: ChecklistSignals,
   items: ChecklistItemLike[],
   themeProfile?: ThemeProfile,
-  _context?: string
+  _context?: string,
+  stepCount?: number
 ): string {
   const profile = themeProfile || analyzeChecklistTheme(items);
   const { themeKeywords, specialty } = profile;
@@ -313,6 +314,7 @@ function buildImagePrompt(
 
   // Use only top 5 theme keywords to keep it short
   const keywords = themeKeywords.slice(0, 5).join(', ');
+  const checkpointCount = stepCount || Math.max(2, items.length);
 
   return `Create a vibrant, optimistic TOP-DOWN ZOOMED-OUT game map view showing multiple checkpoints/stages across a themed landscape.
 
@@ -323,6 +325,7 @@ CRITICAL LAYOUT REQUIREMENTS:
 - NO CONNECTION PATTERNS: The map should show the landscape with checkpoints, but NO visible path connections
 - Checkpoints should be distributed across the map in a logical progression pattern
 - Map should feel like a game world map with multiple locations visible at once
+- CHECKPOINT MARKERS: Show circular areas or clear locations where milestone coins will be placed (approximately ${stepCount} checkpoint locations). These should be visible as distinct circular spots or clear landing areas on the terrain where game coins will be rendered. Make these locations obvious and well-positioned along the path progression.
 
 REFERENCE STYLE:
 - Similar to Clash of Clans campaign map: top-down view, zoomed out, showing multiple stages
@@ -370,10 +373,10 @@ export async function generateMapImage(
 
   try {
     const effectiveTheme = params.themeProfile || analyzeChecklistTheme(items);
-    // Don't pass context - only use theme for image generation
-    let prompt = buildImagePrompt(signals, items, effectiveTheme);
-    const themeKey = params.themeKey || effectiveTheme.themeKey;
     const stepCount = params.stepCount || Math.max(2, items.length);
+    // Don't pass context - only use theme for image generation
+    let prompt = buildImagePrompt(signals, items, effectiveTheme, undefined, stepCount);
+    const themeKey = params.themeKey || effectiveTheme.themeKey;
     const imageModel = process.env.OPENAI_IMAGE_MODEL || 'gpt-image-1';
 
     // Add reference to example map style
@@ -546,44 +549,19 @@ export async function analyzeMapImageForCheckpoints(
   stepCount: number,
   items: ChecklistItemLike[]
 ): Promise<{ path: MapPoint[]; nodes: MapNode[] } | null> {
-  const provider = (process.env.AI_VISION_PROVIDER || 'openai').toLowerCase();
+  // ALWAYS use OpenAI Vision for map analysis (not SageMaker/MedGemma)
+  // Map images are game maps, not medical images, so they should use OpenAI Vision
   const apiKey = process.env.OPENAI_API_KEY;
-  const model = process.env.OPENAI_VISION_MODEL || 'gpt-4.1-mini';
+  const model = process.env.OPENAI_VISION_MODEL || 'gpt-4o';
   
   if (!apiKey) {
-    console.error('OPENAI_API_KEY missing for image analysis');
+    console.error('OPENAI_API_KEY missing for map image analysis');
     return null;
   }
 
   try {
-    // Compress/resize image to avoid 413 errors with SageMaker
-    let processedBuffer = imageBuffer;
-    let imageBase64: string;
-    
-    if (provider === 'sagemaker') {
-      // Resize image to max 1024px on longest side and compress for SageMaker to avoid 413 errors
-      if (sharp) {
-        try {
-          processedBuffer = await sharp(imageBuffer)
-            .resize(1024, 1024, { 
-              fit: 'inside',
-              withoutEnlargement: true 
-            })
-            .jpeg({ quality: 80, mozjpeg: true })
-            .toBuffer();
-          console.log(`Compressed image from ${imageBuffer.length} bytes to ${processedBuffer.length} bytes for SageMaker (${Math.round((1 - processedBuffer.length / imageBuffer.length) * 100)}% reduction)`);
-        } catch (sharpError) {
-          console.warn('Sharp compression failed, using original image:', sharpError);
-          processedBuffer = imageBuffer;
-        }
-      } else {
-        console.warn('Sharp not available - image may be too large for SageMaker. Consider installing sharp package.');
-        processedBuffer = imageBuffer;
-      }
-    }
-    
-    // Convert buffer to base64
-    imageBase64 = processedBuffer.toString('base64');
+    // Convert buffer to base64 (no compression needed for OpenAI Vision)
+    const imageBase64 = imageBuffer.toString('base64');
     
     const itemsList = items.map((item, idx) => `  ${idx + 1}. ${item.title || `Step ${idx + 1}`}`).join('\n');
     
@@ -636,50 +614,45 @@ REQUIREMENTS:
 - All coordinates must be between 0.0 and 1.0
 - Nodes must be in order from start (index 0) to end (index ${stepCount - 1})`;
 
-    let content = '';
-    if (provider === 'sagemaker') {
-      const result = await invokeImageModel(imageBase64, prompt);
-      content = result.text || '';
-    } else {
-      const response = await fetch('https://api.openai.com/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          model,
-          messages: [
-            {
-              role: 'user',
-              content: [
-                {
-                  type: 'text',
-                  text: prompt,
+    // Always use OpenAI Vision API for map analysis
+    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model,
+        temperature: 0.2,
+        max_tokens: 2000,
+        messages: [
+          {
+            role: 'user',
+            content: [
+              {
+                type: 'text',
+                text: prompt,
+              },
+              {
+                type: 'image_url',
+                image_url: {
+                  url: `data:image/png;base64,${imageBase64}`,
                 },
-                {
-                  type: 'image_url',
-                  image_url: {
-                    url: `data:image/png;base64,${imageBase64}`,
-                  },
-                },
-              ],
-            },
-          ],
-          max_tokens: 2000,
-          temperature: 0.3,
-        }),
-      });
+              },
+            ],
+          },
+        ],
+      }),
+    });
 
-      if (!response.ok) {
-        const body = await response.text();
-        console.error(`GPT-4 Vision API error: ${response.status}`, body);
-        return null;
-      }
-
-      const data: any = await response.json();
-      content = data.choices?.[0]?.message?.content || '';
+    if (!response.ok) {
+      const body = await response.text();
+      console.error(`GPT-4 Vision API error: ${response.status}`, body);
+      return null;
     }
+
+    const data: any = await response.json();
+    const content = data.choices?.[0]?.message?.content || '';
     
     if (!content || typeof content !== 'string') {
       console.error('No content in GPT-4 Vision response');
