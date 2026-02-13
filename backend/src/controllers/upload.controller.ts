@@ -82,7 +82,13 @@ export const createConsultation = async (req: AuthRequest, res: Response): Promi
 
     // Structure the paragraph into JSON checklist items
     const checklistData = await structureChecklist(checklistParagraph);
+    console.log(`\n=== CHECKLIST ITEMS GENERATED ===`);
     console.log(`Generated ${checklistData.length} checklist items from GPT for consultation ${consultation._id}`);
+    console.log(`\nFull checklist items JSON that will be saved to DB:`);
+    console.log(JSON.stringify(checklistData, null, 2));
+    console.log(`\nRaw consultation paragraph used for generation:`);
+    console.log(checklistParagraph);
+    console.log(`===================================\n`);
 
     // Save checklist items to database
     const checklistItems = await ChecklistItem.insertMany(
@@ -109,7 +115,21 @@ export const createConsultation = async (req: AuthRequest, res: Response): Promi
     }));
     
     // Detect ONE consultation-wide specialty theme via GPT-4o-mini for consistency across all maps
+    console.log(`\n=== THEME DETECTION ===`);
+    console.log(`Raw consultation context for theme detection:`);
+    console.log(checklistParagraph);
+    console.log(`\nChecklist items data for theme detection:`);
+    console.log(JSON.stringify(checklistItemsData, null, 2));
+    
     const consultationTheme = await detectThemeWithOpenAI(checklistItemsData, checklistParagraph);
+    
+    console.log(`\nDetected theme:`);
+    console.log(JSON.stringify(consultationTheme, null, 2));
+    console.log(`Theme Key: ${consultationTheme.themeKey}`);
+    console.log(`Specialty: ${consultationTheme.specialty}`);
+    console.log(`Theme Keywords: ${consultationTheme.themeKeywords.join(', ')}`);
+    console.log(`Specific Elements: ${consultationTheme.specificElements.join(', ')}`);
+    console.log(`========================\n`);
 
     // Split checklist into map chunks (3-6 steps per map)
     const MIN_STEPS_PER_MAP = 3;
@@ -190,7 +210,13 @@ export const createConsultation = async (req: AuthRequest, res: Response): Promi
         }
 
         // STEP 1: Generate map image
-        console.log(`Generating map image for map ${mapIndex}, theme: ${themeProfile.specialty}, steps: ${stepCount}`);
+        console.log(`\n=== GENERATING MAP IMAGE ${mapIndex} ===`);
+        console.log(`Theme: ${themeProfile.specialty} (key: ${themeProfile.themeKey})`);
+        console.log(`Steps: ${stepCount}`);
+        console.log(`Theme Keywords: ${themeProfile.themeKeywords.join(', ')}`);
+        console.log(`Specific Elements: ${themeProfile.specificElements.join(', ')}`);
+        console.log(`==============================\n`);
+        
         const imageResult = await generateMapImage(signals, itemsForMap, {
           consultationId: consultation._id.toString(),
           mapIndex,

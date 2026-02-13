@@ -3,6 +3,14 @@ import path from 'path';
 import { ChecklistSignals, GeneratedMapSpec, MapNode, MapPoint, MapThemeId } from './mapSpec/types';
 import { invokeImageGenerationModel, invokeImageModel, invokeTextModel } from './sagemaker';
 
+// Dynamic import for sharp to avoid issues if not available
+let sharp: any = null;
+try {
+  sharp = require('sharp');
+} catch {
+  // Sharp not available, will use fallback
+}
+
 const MAPS_DIR = path.join(__dirname, '../../maps');
 const PROMPT_VERSION = 2;
 
@@ -163,12 +171,13 @@ export async function detectThemeWithOpenAI(
 
 CRITICAL RULES:
 - Return JSON only.
-- Pick exactly one specialty based on SPECIFIC keywords in the content.
+- PRIORITIZE the "Raw consultation context" section - it contains the user's direct input.
+- Pick exactly one specialty based on SPECIFIC keywords in the RAW CONTEXT first, then checklist items.
 - Theme must reflect user input directly, not generic wellness assumptions.
-- Be VERY SPECIFIC: Look for exact medical terms and procedures mentioned.
+- Be VERY SPECIFIC: Look for exact medical terms and procedures mentioned in the raw context.
 
-SPECIFIC THEME DETECTION RULES (check in order):
-1. DENTISTRY: If ANY of these appear → "tooth", "teeth", "dental", "dentist", "wisdom tooth", "tooth removal", "extraction", "oral", "gum", "molar", "canine", "incisor", "root canal", "cavity", "filling", "braces", "orthodontist", "oral surgery", "toothache", "dental hygiene", "flossing", "brushing teeth"
+SPECIFIC THEME DETECTION RULES (check in order, prioritize raw context):
+1. DENTISTRY: If ANY of these appear in raw context → "tooth", "teeth", "dental", "dentist", "wisdom tooth", "wisdom teeth", "tooth removal", "tooth extraction", "extraction", "oral", "gum", "molar", "canine", "incisor", "root canal", "cavity", "filling", "braces", "orthodontist", "oral surgery", "toothache", "dental hygiene", "flossing", "brushing teeth", "removed tooth", "removed teeth"
 2. CHIROPRACTIC: If ANY of these appear → "chiropractor", "spine", "back pain", "vertebra", "alignment", "posture", "spinal", "subluxation", "adjustment", "neck pain", "lower back"
 3. CHEST RADIOLOGY: If ANY of these appear → "chest xray", "chest x-ray", "lung imaging", "pulmonary", "radiology", "CT scan chest", "chest imaging"
 4. MEDICATION: If ANY of these appear → "medication", "prescription", "antibiotic", "dosage", "pharmacy", "pill", "tablet", "medicine", "drug"
@@ -176,20 +185,22 @@ SPECIFIC THEME DETECTION RULES (check in order):
 6. FITNESS: If ANY of these appear → "exercise", "workout", "fitness", "gym", "running", "walking", "cardio"
 7. GENERAL WELLNESS: Only if none of the above match
 
-Include 5-10 side elements that fit the specialty.
+IMPORTANT: If the raw context mentions "wisdom tooth", "wisdom teeth", "tooth removal", or any dental procedure, you MUST choose DENTISTRY theme, not general wellness or medication.
+
+Include 5-10 side elements that fit the specialty. For dentistry, include: teeth, tooth structures, dental tools, oral care elements, etc.
 
 Output JSON schema:
 {
   "theme_key": "dentistry|chiropractic|chest_radiology|radiology|cardiology|orthopedics|medication|fitness|nutrition|general_wellness",
-  "specialty": "Human readable specialty name",
-  "theme_keywords": ["keyword1", "keyword2"],
-  "specific_elements": ["element1", "element2", "element3"]
+  "specialty": "Human readable specialty name (e.g., 'Dentistry' or 'Dental Care')",
+  "theme_keywords": ["keyword1", "keyword2", "keyword3"],
+  "specific_elements": ["element1", "element2", "element3", "element4", "element5"]
 }
 
-Raw consultation context:
+Raw consultation context (PRIORITIZE THIS):
 ${rawContext || '(none)'}
 
-Checklist items:
+Checklist items (use as secondary reference):
 ${checklistText}`;
 
   try {
@@ -285,7 +296,7 @@ function buildImagePrompt(
   if (themeKeyLower.includes('chiropractic') || themeKeyLower.includes('spine') || themeKeyLower.includes('back')) {
     worldMaterial = 'a vibrant world of glowing spine structures, healthy vertebrae, and strong bone formations. Trees are elegant vertebra pillars, ground sparkles with bone fragments. Bright, optimistic, healing energy.';
   } else if (themeKeyLower.includes('dentist') || themeKeyLower.includes('dental')) {
-    worldMaterial = 'a bright world of pearly white teeth, shiny dental tools, and healthy oral care elements. Trees are gleaming molars, ground glistens with tooth structures. Clean, fresh, optimistic.';
+    worldMaterial = 'a vibrant world made ENTIRELY of teeth, tooth structures, dental tools, and oral care elements. Trees are giant molars and tooth structures, ground is made of tooth fragments and dental elements, everything is dental-themed. Bright, clean, optimistic dental world. NO traditional vegetation, NO medical equipment unrelated to dental care.';
   } else if (themeKeyLower.includes('nutrition') || themeKeyLower.includes('vegetable')) {
     worldMaterial = 'a colorful world of fresh vegetables, vibrant fruits, and healthy food. Trees are giant colorful vegetables, ground is lush with food elements. Bright, energetic, life-giving.';
   } else if (themeKeyLower.includes('vitamin') || themeKeyLower.includes('supplement')) {
@@ -303,20 +314,33 @@ function buildImagePrompt(
   // Use only top 5 theme keywords to keep it short
   const keywords = themeKeywords.slice(0, 5).join(', ');
 
-  return `Create a vibrant, optimistic 3D perspective medical map with a SINGLE SNAKE-LIKE PATH that CROSSES THE ENTIRE IMAGE from bottom edge to top edge.
+  return `Create a vibrant, optimistic TOP-DOWN ZOOMED-OUT game map view showing multiple checkpoints/stages across a themed landscape.
 
-CRITICAL PATH REQUIREMENTS:
-- Path MUST start at the very BOTTOM EDGE of the image (y=1.0) and wind ALL THE WAY to the very TOP EDGE (y=0.0)
-- Path MUST be visible from bottom to top, crossing the full height of the image
-- Path should be snake-like with smooth curves, winding from bottom foreground to top background
-- Path must be wide, clearly visible, and the dominant visual element
-- Use 3D perspective: path wider at bottom (foreground), narrower at top (background)
+CRITICAL LAYOUT REQUIREMENTS:
+- TOP-DOWN VIEW: Bird's eye view looking down at the map (like Clash of Clans campaign map)
+- ZOOMED OUT: Show multiple checkpoints/stages visible across the entire map area
+- NO PATH DOTS: Do NOT draw connecting dots, lines, or path patterns between checkpoints
+- NO CONNECTION PATTERNS: The map should show the landscape with checkpoints, but NO visible path connections
+- Checkpoints should be distributed across the map in a logical progression pattern
+- Map should feel like a game world map with multiple locations visible at once
 
-LAYOUT: One main path only, perspective view (NOT top-down), path spans full image height from bottom edge to top edge.
+REFERENCE STYLE:
+- Similar to Clash of Clans campaign map: top-down view, zoomed out, showing multiple stages
+- Parchment/textured background feel
+- Multiple checkpoints visible across the terrain
+- NO dots connecting checkpoints, NO path lines visible
 
-THEME: ${specialty}. Keywords: ${keywords}. World made of ${worldMaterial}. Place positive themed elements along both sides of path.
+THEME REQUIREMENTS (CRITICAL - MUST FOLLOW):
+- Theme: ${specialty}
+- Keywords: ${keywords}
+- World made of: ${worldMaterial}
+- The ENTIRE terrain/landscape must be constructed from ${specialty}-themed elements
+- Place ${specialty}-themed structures, formations, and elements throughout the map
+- DO NOT include medical equipment or elements unrelated to ${specialty}
+- For example: If theme is dentistry, the ENTIRE map terrain should be made of teeth, dental tools, oral care elements - NO inhalers, NO blood pressure machines, NO unrelated medical devices
+- The landscape itself (ground, terrain features, structures) must be ${specialty}-themed
 
-STYLE: 3D isometric perspective like Rick and Morty portals. Vibrant, colorful, optimistic, high-detail. Bright lighting, positive energy. NO traditional vegetation, NO people, NO text. Pure background image.`;
+STYLE: Top-down game map view, vibrant, colorful, optimistic, high-detail. Bright lighting, positive energy. NO traditional vegetation, NO people, NO text labels, NO path dots, NO connection lines, NO unrelated medical equipment. Pure themed landscape map with ${specialty} theme only.`;
 }
 
 /**
@@ -351,6 +375,51 @@ export async function generateMapImage(
     const themeKey = params.themeKey || effectiveTheme.themeKey;
     const stepCount = params.stepCount || Math.max(2, items.length);
     const imageModel = process.env.OPENAI_IMAGE_MODEL || 'gpt-image-1';
+
+    // Add reference to example map style
+    const exampleMapPath = path.join(__dirname, '../../example_map.png');
+    if (fs.existsSync(exampleMapPath)) {
+      // Use GPT-4 Vision to analyze the example map and include style reference
+      try {
+        const exampleImageBuffer = fs.readFileSync(exampleMapPath);
+        const exampleImageBase64 = exampleImageBuffer.toString('base64');
+        const visionPrompt = `Analyze this game map image. Describe its visual style, layout, and composition. Focus on: view perspective (top-down/zoomed-out), how checkpoints/stages are distributed, terrain style, and overall aesthetic. Keep description concise.`;
+        
+        const visionResponse = await fetch('https://api.openai.com/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${apiKey}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            model: 'gpt-4.1-mini',
+            messages: [
+              {
+                role: 'user',
+                content: [
+                  { type: 'text', text: visionPrompt },
+                  {
+                    type: 'image_url',
+                    image_url: { url: `data:image/png;base64,${exampleImageBase64}` },
+                  },
+                ],
+              },
+            ],
+            max_tokens: 200,
+          }),
+        });
+
+        if (visionResponse.ok) {
+          const visionData: any = await visionResponse.json();
+          const styleDescription = visionData.choices?.[0]?.message?.content || '';
+          if (styleDescription) {
+            prompt += `\n\nREFERENCE STYLE: Follow the visual style and layout approach similar to this game map: ${styleDescription}. Use similar top-down zoomed-out perspective, checkpoint distribution, and terrain composition, but adapt it to the ${effectiveTheme.specialty} theme.`;
+          }
+        }
+      } catch (visionError) {
+        console.warn('Failed to analyze example map, continuing without reference:', visionError);
+      }
+    }
 
     // Continuation instruction for maps after the first one.
     if ((params.continuationLevel || 1) > 1) {
@@ -487,35 +556,62 @@ export async function analyzeMapImageForCheckpoints(
   }
 
   try {
+    // Compress/resize image to avoid 413 errors with SageMaker
+    let processedBuffer = imageBuffer;
+    let imageBase64: string;
+    
+    if (provider === 'sagemaker') {
+      // Resize image to max 1024px on longest side and compress for SageMaker to avoid 413 errors
+      if (sharp) {
+        try {
+          processedBuffer = await sharp(imageBuffer)
+            .resize(1024, 1024, { 
+              fit: 'inside',
+              withoutEnlargement: true 
+            })
+            .jpeg({ quality: 80, mozjpeg: true })
+            .toBuffer();
+          console.log(`Compressed image from ${imageBuffer.length} bytes to ${processedBuffer.length} bytes for SageMaker (${Math.round((1 - processedBuffer.length / imageBuffer.length) * 100)}% reduction)`);
+        } catch (sharpError) {
+          console.warn('Sharp compression failed, using original image:', sharpError);
+          processedBuffer = imageBuffer;
+        }
+      } else {
+        console.warn('Sharp not available - image may be too large for SageMaker. Consider installing sharp package.');
+        processedBuffer = imageBuffer;
+      }
+    }
+    
     // Convert buffer to base64
-    const imageBase64 = imageBuffer.toString('base64');
+    imageBase64 = processedBuffer.toString('base64');
     
     const itemsList = items.map((item, idx) => `  ${idx + 1}. ${item.title || `Step ${idx + 1}`}`).join('\n');
     
-    const prompt = `You are analyzing a medical journey map image. This image shows a single path winding from the bottom/foreground to the top/background in a perspective/isometric view (like Rick and Morty dimension portals).
+    const prompt = `You are analyzing a medical journey map image. This image shows a TOP-DOWN ZOOMED-OUT game map view with multiple checkpoints/stages visible across the terrain (like Clash of Clans campaign map style).
 
 CRITICAL REQUIREMENTS:
-1. You MUST identify the SINGLE MAIN PATHWAY in the image - it should be a snake-like winding path from bottom to top
-2. You MUST determine EXACTLY ${stepCount} checkpoint positions along this path
+1. This is a TOP-DOWN ZOOMED-OUT map view (bird's eye view, like Clash of Clans campaign map)
+2. You MUST identify ${stepCount} checkpoint/stage locations distributed across the map
 3. Each checkpoint corresponds to a step in the journey:
 ${itemsList}
-4. Checkpoints MUST be evenly distributed along the path's length from start (bottom) to end (top)
-5. ALL checkpoints MUST be positioned directly ON the pathway, not beside it or off the path
+4. Checkpoints should be distributed across the map in a logical progression pattern (typically from one corner/edge to another)
+5. Checkpoints can be positioned at interesting terrain features, structures, or landmarks visible in the map
 
 COORDINATE SYSTEM:
-- The image is viewed from a person's perspective (isometric/3D perspective), NOT top-down
+- The image is a TOP-DOWN view (bird's eye perspective looking down)
 - Coordinates are normalized (0.0 to 1.0) where:
   - x: 0.0 = left edge of image, 1.0 = right edge of image
   - y: 0.0 = top edge of image, 1.0 = bottom edge of image (y increases downward)
-- The path typically starts near the bottom-center (x ~0.5, y ~0.9-0.95) and winds upward
-- The path typically ends near the top (y ~0.05-0.15)
+- Checkpoints should be distributed across the map area, not just along a single path
+- The first checkpoint (index 0) is typically near one edge/corner
+- The last checkpoint (index ${stepCount - 1}) is typically near the opposite edge/corner
 
 NODE PLACEMENT RULES:
-- The first node (index 0) should be near the START of the path (bottom, y close to 1.0)
-- The last node (index ${stepCount - 1}) should be near the END of the path (top, y close to 0.0)
-- Intermediate nodes should be evenly spaced along the path's curve
-- Each node's x and y coordinates must be ON the visible pathway
-- If the path curves left/right, follow the curve with the nodes
+- The first node (index 0) should be positioned at a starting location (typically bottom-left or bottom-center, y ~0.7-0.9)
+- The last node (index ${stepCount - 1}) should be positioned at an ending location (typically top-right or top-center, y ~0.1-0.3)
+- Intermediate nodes should be distributed across the map in a logical progression
+- Nodes should be positioned at visible landmarks, structures, or interesting terrain features
+- Nodes should form a logical journey path across the map from start to end
 
 Return ONLY a valid JSON object with this exact structure (no markdown, no code blocks):
 {
