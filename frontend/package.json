@@ -9,6 +9,7 @@
     "lint": "next lint"
   },
   "dependencies": {
+    "@types/three": "^0.182.0",
     "axios": "^1.7.9",
     "framer-motion": "^11.15.0",
     "lucide-react": "^0.468.0",
@@ -16,6 +17,8 @@
     "pixi.js": "^8.6.6",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
+    "three": "^0.182.0",
+    "three-fbx-loader": "^1.0.3",
     "zustand": "^5.0.2"
   },
   "devDependencies": {
@@ -28,4 +31,3 @@
     "typescript": "^5.7.2"
   }
 }
-

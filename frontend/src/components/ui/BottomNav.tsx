@@ -4,7 +4,6 @@ import { motion } from 'framer-motion';
 
 const navItems = [
   { path: '/dashboard', label: 'Map', icon: '🗺️' },
-  { path: '/consultations', label: 'Consultations', icon: '📋' },
   { path: '/upload', label: 'Upload', icon: '📤' },
   { path: '/checklist', label: 'Tasks', icon: '✅' },
   { path: '/leaderboard', label: 'Rank', icon: '🏆' },

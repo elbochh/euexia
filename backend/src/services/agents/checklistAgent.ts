@@ -40,32 +40,14 @@ JSON checklist:`;
       jsonStr = jsonMatch[0];
     }
     const items: ChecklistItemData[] = JSON.parse(jsonStr);
-    
-    // Validate items
-    if (!Array.isArray(items) || items.length === 0) {
-      throw new Error('Checklist items must be a non-empty array');
-    }
-    
-    // Validate each item has required fields
-    const validItems = items.filter((item) => {
-      return item.title && item.description && item.category;
-    });
-    
-    if (validItems.length === 0) {
-      throw new Error('No valid checklist items found');
-    }
-    
-    console.log(`Successfully parsed ${validItems.length} checklist items from GPT`);
-    return validItems;
+    return items;
   } catch (error) {
-    console.error('Failed to parse checklist JSON:', error);
-    console.error('GPT response was:', result.text);
+    console.error('Failed to parse checklist JSON, using fallback:', error);
     // Fallback: create a single item from the paragraph
-    console.warn('Using fallback checklist item');
     return [
       {
         title: 'Follow care plan',
-        description: paragraph.substring(0, 500), // Limit description length
+        description: paragraph,
         frequency: 'daily',
         category: 'general',
         xpReward: 10,
