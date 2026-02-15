@@ -94,6 +94,33 @@ export interface PersonalizedMapSpec {
   meta: { source: 'ai' | 'fallback'; seed: number; checklistCount: number };
 }
 
+interface Consultation {
+  _id: string;
+  userId: string;
+  title: string;
+  status: string;
+  createdAt: string;
+  maps?: Array<{
+    _id: string;
+    mapIndex: number;
+    startStepIndex: number;
+    endStepIndex: number;
+    mapSpec: PersonalizedMapSpec;
+    source: 'ai' | 'fallback';
+  }>;
+  checklistItems?: ChecklistItem[];
+  totalSteps?: number;
+}
+
+interface CurrentMapInfo {
+  consultationId: string;
+  consultationTitle: string;
+  mapIndex: number;
+  startStepIndex: number;
+  endStepIndex: number;
+  totalSteps: number;
+}
+
 interface GameStore {
   // Auth
   user: User | null;
@@ -107,6 +134,9 @@ interface GameStore {
   mapSpec: PersonalizedMapSpec | null;
   mapSpecSource: 'ai' | 'fallback' | null;
   mapValidationWarnings: string[];
+  mapImageUrl: string | null;
+  currentMapInfo: CurrentMapInfo | null;
+  consultations: Consultation[];
   isLoading: boolean;
 
   // Leaderboard
@@ -118,11 +148,14 @@ interface GameStore {
   logout: () => void;
   loadProfile: () => Promise<void>;
   loadProgress: () => Promise<void>;
-  loadChecklist: () => Promise<void>;
+  loadChecklist: (consultationId?: string) => Promise<void>;
   completeItem: (itemId: string) => Promise<RewardPopup | null>;
   dismissReward: () => void;
   loadLeaderboard: () => Promise<void>;
   loadMapSpec: () => Promise<void>;
+  loadCurrentMap: () => Promise<void>;
+  loadMap: (consultationId: string, mapIndex?: number) => Promise<void>;
+  loadConsultationsWithMaps: () => Promise<void>;
   initFromStorage: () => void;
 }
 
@@ -137,6 +170,9 @@ export const useGameStore = create<GameStore>((set, get) => ({
   mapSpec: null,
   mapSpecSource: null,
   mapValidationWarnings: [],
+  mapImageUrl: null,
+  currentMapInfo: null,
+  consultations: [],
   isLoading: false,
   leaderboard: [],
   userRank: 0,
@@ -177,14 +213,23 @@ export const useGameStore = create<GameStore>((set, get) => ({
     }
   },
 
-  loadChecklist: async () => {
+  loadChecklist: async (consultationId?: string) => {
     try {
       set({ isLoading: true });
-      const res = await checklistApi.getAll();
-      set({ checklist: res.data.items, isLoading: false });
+      let res;
+      if (consultationId) {
+        // Load items for specific consultation
+        res = await checklistApi.getByConsultation(consultationId);
+        console.log(`Loaded ${res.data.items?.length || 0} checklist items for consultation ${consultationId}`);
+      } else {
+        // Load all items for user
+        res = await checklistApi.getAll();
+        console.log(`Loaded ${res.data.items?.length || 0} checklist items for user`);
+      }
+      set({ checklist: res.data.items || [], isLoading: false });
     } catch (error) {
       console.error('Failed to load checklist:', error);
-      set({ isLoading: false });
+      set({ isLoading: false, checklist: [] });
     }
   },
 
@@ -245,6 +290,67 @@ export const useGameStore = create<GameStore>((set, get) => ({
       });
     } catch (error) {
       console.error('Failed to load map spec:', error);
+    }
+  },
+
+  loadCurrentMap: async () => {
+    try {
+      const res = await gameApi.getCurrentMap();
+      const consultationId = res.data.consultationId;
+      if (consultationId) {
+        set({
+          mapSpec: res.data.mapSpec,
+          mapSpecSource: res.data.source || null,
+          mapValidationWarnings: res.data.validation?.warnings || [],
+          mapImageUrl: res.data.mapImageUrl || null,
+          currentMapInfo: {
+            consultationId: consultationId,
+            consultationTitle: res.data.consultationTitle || 'My Consultation',
+            mapIndex: res.data.mapIndex || 0,
+            startStepIndex: res.data.startStepIndex || 0,
+            endStepIndex: res.data.endStepIndex || 0,
+            totalSteps: res.data.totalSteps || 0,
+          },
+        });
+        // Reload checklist items for this consultation to ensure we have the latest
+        await get().loadChecklist(consultationId);
+      }
+    } catch (error) {
+      // No current map is fine - user needs to select a consultation
+      console.log('No current map loaded, user needs to select a consultation');
+    }
+  },
+
+  loadMap: async (consultationId: string, mapIndex: number = 0) => {
+    try {
+      const res = await gameApi.getMap(consultationId, mapIndex);
+      set({
+        mapSpec: res.data.mapSpec,
+        mapSpecSource: res.data.source || null,
+        mapValidationWarnings: res.data.validation?.warnings || [],
+        mapImageUrl: res.data.mapImageUrl || null,
+        currentMapInfo: {
+          consultationId: res.data.consultationId,
+          consultationTitle: '',
+          mapIndex: res.data.mapIndex || 0,
+          startStepIndex: res.data.startStepIndex || 0,
+          endStepIndex: res.data.endStepIndex || 0,
+          totalSteps: res.data.totalSteps || 0,
+        },
+      });
+      // Reload checklist items for this consultation to ensure we have the latest
+      await get().loadChecklist(consultationId);
+    } catch (error) {
+      console.error('Failed to load map:', error);
+    }
+  },
+
+  loadConsultationsWithMaps: async () => {
+    try {
+      const res = await gameApi.getConsultationsWithMaps();
+      set({ consultations: res.data.consultations || [] });
+    } catch (error) {
+      console.error('Failed to load consultations with maps:', error);
     }
   },
 

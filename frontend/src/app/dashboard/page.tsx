@@ -1,11 +1,13 @@
 'use client';
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import { motion } from 'framer-motion';
 import dynamic from 'next/dynamic';
 import TopBar from '@/components/ui/TopBar';
 import BottomNav from '@/components/ui/BottomNav';
 import RewardPopup from '@/components/ui/RewardPopup';
+import CheckpointBottomOverlay from '@/components/game/CheckpointBottomOverlay';
 import { useGameStore } from '@/stores/gameStore';
 import { GAME_CONFIG } from '@/lib/gameConfig';
 
@@ -18,16 +20,33 @@ export default function DashboardPage() {
     progress,
     checklist,
     mapSpec,
-    mapSpecSource,
-    mapValidationWarnings,
+    mapImageUrl,
+    currentMapInfo,
+    consultations,
+    completeItem,
     initFromStorage,
     loadProgress,
     loadChecklist,
-    loadMapSpec,
+    loadCurrentMap,
+    loadMap,
+    loadConsultationsWithMaps,
   } = useGameStore();
+
+  const [selectedCheckpoint, setSelectedCheckpoint] = useState<number | null>(null);
+  const [showDoctorChat, setShowDoctorChat] = useState(false);
+  const [showConsultationSelector, setShowConsultationSelector] = useState(false);
 
   useEffect(() => {
     initFromStorage();
+    
+    // Expose doctor chat function globally for GameCanvas
+    (window as any).__openDoctorChat = () => {
+      setShowDoctorChat(true);
+    };
+    
+    return () => {
+      delete (window as any).__openDoctorChat;
+    };
   }, []);
 
   useEffect(() => {
@@ -40,146 +59,332 @@ export default function DashboardPage() {
     }
     if (isAuthenticated) {
       loadProgress();
-      loadChecklist();
-      loadMapSpec();
+      (async () => {
+        await loadConsultationsWithMaps();
+        // After loading consultations, try to load current map
+        await loadCurrentMap();
+        // If no current map after loading, auto-select first consultation if available
+        const { consultations: loadedConsultations, currentMapInfo } = useGameStore.getState();
+        if (loadedConsultations.length > 0 && !currentMapInfo) {
+          // Auto-select first consultation if none selected
+          const firstConsultation = loadedConsultations[0];
+          if (firstConsultation.maps && firstConsultation.maps.length > 0) {
+            await loadMap(firstConsultation._id, 0);
+          } else if (firstConsultation._id) {
+            await loadChecklist(firstConsultation._id);
+          }
+        }
+      })();
     }
   }, [isAuthenticated]);
 
-  const completedCount = checklist.filter((i) => i.isCompleted).length;
-  const totalCount = checklist.length;
+  // Get checklist items for current consultation
+  const currentConsultationId = currentMapInfo?.consultationId;
+  const currentChecklist = currentConsultationId
+    ? checklist.filter((i) => i.consultationId === currentConsultationId)
+    : checklist;
+
+  // Get items for current map only
+  const mapChecklist = currentMapInfo
+    ? currentChecklist.filter(
+        (item, idx) =>
+          idx >= currentMapInfo.startStepIndex && idx <= currentMapInfo.endStepIndex
+      )
+    : currentChecklist.slice(0, 6);
+
+  const completedCount = mapChecklist.filter((i) => i.isCompleted).length;
+  const totalCount = mapChecklist.length;
   const currentTheme = progress?.currentTheme || 'desert';
   const themeInfo = GAME_CONFIG.themeColors[currentTheme];
 
-  const todayTasks = checklist.filter((i) => !i.isCompleted).slice(0, 3);
+  // Get current consultation info
+  const currentConsultation = consultations.find(
+    (c) => c._id === currentMapInfo?.consultationId
+  );
+
+  // Get all maps for current consultation
+  const currentMaps = currentConsultation?.maps || [];
+  const currentMapIndex = currentMapInfo?.mapIndex ?? 0;
+  const hasNextMap = currentMapIndex < currentMaps.length - 1;
+  const hasPrevMap = currentMapIndex > 0;
+
+  // If no current consultation or no maps, show consultation selector
+  const needsConsultationSelection = !currentMapInfo || consultations.length === 0 || (consultations.length > 0 && !currentConsultation);
+
+  const handleSelectConsultation = async (consultationId: string) => {
+    await loadMap(consultationId, 0);
+    await loadChecklist(consultationId);
+    setShowConsultationSelector(false);
+  };
+
+  const handleNextMap = () => {
+    if (currentMapInfo && hasNextMap) {
+      loadMap(currentMapInfo.consultationId, currentMapIndex + 1);
+    }
+  };
+
+  const handlePrevMap = () => {
+    if (currentMapInfo && hasPrevMap) {
+      loadMap(currentMapInfo.consultationId, currentMapIndex - 1);
+    }
+  };
+
+  const handleCheckpointClick = (index: number) => {
+    setSelectedCheckpoint(index);
+  };
+
+  const handleCloseModal = () => {
+    setSelectedCheckpoint(null);
+  };
+
+  const handleCompleteTask = async (itemId: string) => {
+    await completeItem(itemId);
+    // Modal will close automatically after completion
+  };
+
+  // Get the selected checkpoint item
+  const selectedItem = selectedCheckpoint !== null 
+    ? mapChecklist[selectedCheckpoint] || null
+    : null;
 
   return (
-    <div className="min-h-screen pb-20 pt-14">
+    <div className="h-screen pb-20 pt-14 flex flex-col overflow-hidden">
       <TopBar />
       <RewardPopup />
 
-      <div className="max-w-lg mx-auto px-3">
-        {/* Theme Header */}
-        <motion.div
-          initial={{ opacity: 0, y: -10 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="text-center mb-3 mt-2"
-        >
-          <span className="text-2xl">{themeInfo?.emoji || '🗺️'}</span>
-          <h2 className="text-lg font-bold" style={{ color: themeInfo?.accent }}>
-            {themeInfo?.name || 'Desert Pyramids'}
-          </h2>
-          <p className="text-gray-500 text-xs">
-            {completedCount}/{totalCount} quests completed
-          </p>
-        </motion.div>
-
+      <div className="w-full flex-1 min-h-0 flex flex-col">
         {/* Game Map */}
         <motion.div
           initial={{ opacity: 0, scale: 0.95 }}
           animate={{ opacity: 1, scale: 1 }}
           transition={{ delay: 0.1 }}
+          className="flex-1 min-h-0 relative"
         >
           <GameCanvas
             theme={currentTheme}
             completedCount={completedCount}
-            totalCount={Math.max(totalCount, 5)}
+            totalCount={Math.max(totalCount, mapChecklist.length)}
             mapSpec={mapSpec}
+            mapImageUrl={mapImageUrl}
+            checklistItems={mapChecklist}
+            onCheckpointClick={handleCheckpointClick}
           />
-        </motion.div>
 
-        {(mapSpecSource || mapValidationWarnings.length > 0) && (
-          <div className="mt-2 px-1 text-[11px] text-gray-400">
-            <span>
-              Map source: {mapSpecSource === 'ai' ? 'AI generated' : 'Fallback template'}
-            </span>
-            {mapValidationWarnings.length > 0 && (
-              <span className="ml-2 text-amber-300">
-                ({mapValidationWarnings.length} validation warning
-                {mapValidationWarnings.length > 1 ? 's' : ''})
-              </span>
+          {/* In-map HUD (minimal, top-left, no container) */}
+          <motion.div
+            initial={{ opacity: 0, y: -8 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="absolute top-3 left-3 z-10 pointer-events-none"
+          >
+            <div className="text-[10px] font-semibold text-blue-100 drop-shadow-[0_1px_2px_rgba(0,0,0,0.9)]">
+              {themeInfo?.emoji || '🗺️'} QUEST MAP
+            </div>
+            <div className="flex items-center gap-2">
+              <h2 className="text-sm font-bold leading-tight text-white drop-shadow-[0_1px_2px_rgba(0,0,0,0.9)]">
+                {currentConsultation?.title || currentMapInfo?.consultationTitle || 'My Consultation'}
+              </h2>
+              {consultations.length > 1 && (
+                <button
+                  onClick={() => setShowConsultationSelector(true)}
+                  className="px-1.5 py-0.5 text-[9px] font-semibold rounded text-white bg-blue-600/70 hover:bg-blue-600/90 pointer-events-auto"
+                  title="Switch consultation"
+                >
+                  ↻
+                </button>
+              )}
+            </div>
+            <p className="text-[11px] text-blue-100 drop-shadow-[0_1px_2px_rgba(0,0,0,0.9)]">
+              {completedCount}/{totalCount} quests
+              {currentMapInfo && currentMaps.length > 1 && ` • Map ${currentMapIndex + 1}/${currentMaps.length}`}
+            </p>
+            {currentMapInfo && currentMaps.length > 1 && (
+              <div className="flex items-center gap-1.5 mt-1.5 pointer-events-auto">
+                <button
+                  onClick={handlePrevMap}
+                  disabled={!hasPrevMap}
+                  className="px-2 py-1 text-[10px] font-semibold rounded text-white bg-blue-600/70 disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  ← Back
+                </button>
+                <button
+                  onClick={handleNextMap}
+                  disabled={!hasNextMap}
+                  className="px-2 py-1 text-[10px] font-semibold rounded text-white bg-blue-600/70 disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  Next →
+                </button>
+              </div>
             )}
-          </div>
-        )}
+          </motion.div>
 
-        {/* Today's Quests Quick View */}
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.3 }}
-          className="mt-4"
-        >
-          <div className="flex items-center justify-between mb-2 px-1">
-            <h3 className="text-sm font-bold text-blue-300">⚔️ Today&apos;s Quests</h3>
-            <button
-              onClick={() => router.push('/checklist')}
-              className="text-xs text-blue-400 hover:text-blue-300"
-            >
-              View All →
-            </button>
-          </div>
-
-          {todayTasks.length > 0 ? (
-            todayTasks.map((task, i) => (
+          {/* Consultation Selector Overlay */}
+          {showConsultationSelector && (
+            <div className="absolute inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm">
               <motion.div
-                key={task._id}
-                initial={{ opacity: 0, x: -10 }}
-                animate={{ opacity: 1, x: 0 }}
-                transition={{ delay: 0.4 + i * 0.1 }}
-                className="game-card flex items-center gap-3 mb-2 cursor-pointer"
-                onClick={() => router.push('/checklist')}
+                initial={{ opacity: 0, scale: 0.9 }}
+                animate={{ opacity: 1, scale: 1 }}
+                className="game-card max-w-md w-full max-h-[80vh] overflow-y-auto"
               >
-                <span className="text-xl">
-                  {GAME_CONFIG.categoryIcons[task.category] || '✅'}
-                </span>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-semibold truncate">{task.title}</p>
-                  <p className="text-xs text-gray-500 truncate">{task.description}</p>
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-xl font-bold text-white">Select Consultation</h3>
+                  <button
+                    onClick={() => setShowConsultationSelector(false)}
+                    className="p-2 rounded-lg hover:bg-gray-700/50 transition-colors"
+                  >
+                    <svg
+                      className="w-5 h-5 text-gray-400"
+                      fill="none"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth="2"
+                      viewBox="0 0 24 24"
+                      stroke="currentColor"
+                    >
+                      <path d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
                 </div>
-                <div className="text-xs text-purple-300">⚡{task.xpReward}</div>
+                <div className="space-y-2">
+                  {consultations.map((consultation) => {
+                    const isSelected = consultation._id === currentMapInfo?.consultationId;
+                    const mapCount = consultation.maps?.length || 0;
+                    return (
+                      <button
+                        key={consultation._id}
+                        onClick={() => handleSelectConsultation(consultation._id)}
+                        className={`w-full text-left p-3 rounded-lg transition-colors ${
+                          isSelected
+                            ? 'bg-blue-600/30 border-2 border-blue-500'
+                            : 'bg-gray-700/50 hover:bg-gray-700/70 border-2 border-transparent'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <h4 className="font-semibold text-white">{consultation.title}</h4>
+                            <p className="text-sm text-gray-400 mt-1">
+                              {mapCount > 0 && `${mapCount} ${mapCount === 1 ? 'map' : 'maps'}`}
+                              {consultation.status === 'completed' ? ' • Ready' : ' • Processing...'}
+                            </p>
+                          </div>
+                          {isSelected && (
+                            <span className="text-blue-400">✓</span>
+                          )}
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+                <button
+                  onClick={() => router.push('/consultations')}
+                  className="w-full mt-4 btn-game py-2 text-sm"
+                >
+                  View All Consultations
+                </button>
               </motion.div>
-            ))
-          ) : (
-            <div className="game-card text-center py-6">
-              <div className="text-3xl mb-2">🎉</div>
-              <p className="text-sm text-gray-400">All quests completed!</p>
-              <button
-                onClick={() => router.push('/upload')}
-                className="btn-game mt-3 text-sm px-6 py-2"
-              >
-                Upload New Consultation
-              </button>
             </div>
           )}
-        </motion.div>
 
-        {/* Stats Row */}
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          transition={{ delay: 0.5 }}
-          className="grid grid-cols-3 gap-2 mt-4"
-        >
-          <div className="game-card text-center py-3">
-            <div className="text-2xl mb-1">🔥</div>
-            <div className="text-lg font-bold text-orange-300">{progress?.streak || 0}</div>
-            <div className="text-[10px] text-gray-500">Day Streak</div>
-          </div>
-          <div className="game-card text-center py-3">
-            <div className="text-2xl mb-1">⭐</div>
-            <div className="text-lg font-bold text-yellow-300">{progress?.totalCompleted || 0}</div>
-            <div className="text-[10px] text-gray-500">Completed</div>
-          </div>
-          <div className="game-card text-center py-3">
-            <div className="text-2xl mb-1">🗺️</div>
-            <div className="text-lg font-bold text-blue-300">
-              {(progress?.completedThemes?.length || 0) + 1}
+          {/* No Consultation Selected State */}
+          {needsConsultationSelection && !showConsultationSelector && (
+            <div className="absolute inset-0 z-40 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+              <motion.div
+                initial={{ opacity: 0, scale: 0.9 }}
+                animate={{ opacity: 1, scale: 1 }}
+                className="game-card max-w-md w-full mx-4 text-center"
+              >
+                <div className="text-6xl mb-4">🗺️</div>
+                <h3 className="text-xl font-bold text-white mb-2">No Consultation Selected</h3>
+                <p className="text-gray-400 mb-6">
+                  {consultations.length === 0
+                    ? 'Create your first consultation to see your map'
+                    : 'Select a consultation to view its map and checklist'}
+                </p>
+                <div className="space-y-2">
+                  {consultations.length > 0 ? (
+                    <>
+                      <button
+                        onClick={() => setShowConsultationSelector(true)}
+                        className="w-full btn-game py-3"
+                      >
+                        Select Consultation
+                      </button>
+                      <button
+                        onClick={() => router.push('/consultations')}
+                        className="w-full btn-game-secondary py-3"
+                      >
+                        View All Consultations
+                      </button>
+                    </>
+                  ) : (
+                    <button
+                      onClick={() => router.push('/upload')}
+                      className="w-full btn-game py-3"
+                    >
+                      Create Your First Consultation
+                    </button>
+                  )}
+                </div>
+              </motion.div>
             </div>
-            <div className="text-[10px] text-gray-500">Maps</div>
-          </div>
+          )}
         </motion.div>
       </div>
 
       <BottomNav />
+
+      {/* Checkpoint Bottom Overlay */}
+      <CheckpointBottomOverlay
+        isOpen={selectedCheckpoint !== null && selectedItem !== null}
+        onClose={handleCloseModal}
+        item={selectedItem}
+        checkpointNumber={(selectedCheckpoint ?? 0) + 1}
+        onComplete={handleCompleteTask}
+      />
+
+      {/* Doctor Chat Modal (placeholder for now) */}
+      {showDoctorChat && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+          <motion.div
+            initial={{ opacity: 0, scale: 0.9 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.9 }}
+            className="game-card max-w-md w-full relative"
+          >
+            <button
+              onClick={() => setShowDoctorChat(false)}
+              className="absolute top-4 right-4 p-2 rounded-lg hover:bg-gray-700/50 transition-colors"
+            >
+              <svg
+                className="w-5 h-5 text-gray-400"
+                fill="none"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth="2"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+              >
+                <path d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+            <div className="text-center mb-6">
+              <div className="text-5xl mb-2">👨‍⚕️</div>
+              <h3 className="text-xl font-bold text-white">Dr. Consultant</h3>
+              <p className="text-gray-400 text-sm mt-2">How can I help you today?</p>
+            </div>
+            <div className="space-y-3">
+              <button className="w-full btn-game py-3 text-sm">
+                Ask about my treatment plan
+              </button>
+              <button className="w-full btn-game py-3 text-sm">
+                Get medication reminders
+              </button>
+              <button className="w-full btn-game py-3 text-sm">
+                Ask health questions
+              </button>
+            </div>
+          </motion.div>
+        </div>
+      )}
     </div>
   );
 }

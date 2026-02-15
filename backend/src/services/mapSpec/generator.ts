@@ -6,6 +6,7 @@ import {
   ValidationResult,
 } from './types';
 import { sanitizeAndValidateMapSpec } from './schema';
+import { invokeTextModel } from '../sagemaker';
 
 type ChecklistLikeItem = {
   category?: string;
@@ -248,25 +249,51 @@ function buildFallbackMapSpec(signals: ChecklistSignals, nodeCount: number): Gen
   };
 }
 
-function buildMapPrompt(signals: ChecklistSignals, nodeCount: number): string {
-  return `You are a game map designer. Create a JSON map spec for a mobile quest map.
+function buildMapPrompt(signals: ChecklistSignals, nodeCount: number, items: ChecklistLikeItem[], startIndex: number): string {
+  const itemsForMap = items.slice(startIndex, startIndex + nodeCount);
+  const itemsDescription = itemsForMap.map((item, idx) => 
+    `Step ${startIndex + idx + 1}: ${item.title} - ${item.description || 'No description'}`
+  ).join('\n');
+
+  return `You are a professional game map designer. Create a beautiful, detailed, vibrant JSON map spec for a mobile quest game that looks like a rich fantasy island or world map with diverse biomes and landscapes.
+
+CRITICAL REQUIREMENTS FOR VISUAL RICHNESS:
+1. Create a WINDING, INTERESTING PATH that snakes through diverse terrain - not a straight line!
+2. Include MULTIPLE BIOMES: forests, mountains, beaches, rivers, lakes, deserts, grasslands, etc.
+3. Add 10-20 DECORATIVE ELEMENTS: trees, buildings, landmarks, rocks, waterfalls, bridges, boats, etc.
+4. Use VARIED TERRAIN: mix of flat areas, hills, valleys, water features
+5. Make the path VISUALLY INTERESTING: curves, loops, elevation changes
+6. Place nodes at INTERESTING LOCATIONS: near landmarks, on islands, at crossroads, etc.
+7. Create a COHESIVE THEME that matches the medical/wellness checklist items
+
+VISUAL STYLE:
+- Think of maps like those in adventure games: colorful, detailed, with varied landscapes
+- Path should connect nodes in a logical but visually interesting route
+- Each node should be at a distinct, memorable location
+- Decor should be scattered naturally, not clustered
+- Use parallax layers for depth (far mountains, near trees, etc.)
 
 Rules:
-- Output ONLY valid JSON (no markdown).
+- Output ONLY valid JSON (no markdown, no code blocks, no explanations).
 - Coordinates must be normalized floats between 0 and 1.
 - Include exactly ${Math.max(2, nodeCount)} nodes in order.
-- Make path and nodes readable on phone.
-- Theme should reflect checklist signals.
+- Path should have ${Math.max(nodeCount + 2, 8)} points minimum for smooth curves.
+- Make path and nodes readable on phone (nodes spaced well, path clear).
+- Theme should reflect checklist signals (nutrition=jungle, medication=city, etc.).
+- Add 10-20 decor items for visual richness (trees, buildings, landmarks, etc.).
 - Do not include copyrighted game names.
+
+Checklist Items for this map:
+${itemsDescription}
 
 Signals:
 ${JSON.stringify(signals, null, 2)}
 
-JSON shape required:
+JSON shape required (output ONLY the JSON object):
 {
   "version": 1,
   "themeId": "desert_pyramids|jungle_garden|city_vitamins|wellness_generic",
-  "styleTier": "template|enhanced|ai_art",
+  "styleTier": "ai_art",
   "palette": {
     "primary": "#RRGGBB",
     "secondary": "#RRGGBB",
@@ -275,76 +302,136 @@ JSON shape required:
     "sky": "#RRGGBB"
   },
   "background": {
-    "imageUrl": "https://...",
-    "parallaxLayers": [{"assetId":"far_dunes","speed":0.1,"opacity":0.5}]
+    "parallaxLayers": [
+      {"assetId":"far_mountains","speed":0.05,"opacity":0.3},
+      {"assetId":"mid_trees","speed":0.12,"opacity":0.5},
+      {"assetId":"near_grass","speed":0.2,"opacity":0.6}
+    ]
   },
-  "path": [{"x": 0.1, "y": 0.9}],
-  "nodes": [{"id":"n1","index":0,"stageType":"nutrition","label":"Stage 1","x":0.1,"y":0.9}],
-  "decor": [{"assetId":"tree_big","x":0.5,"y":0.4,"scale":1,"layer":"mid"}],
+  "path": [{"x": 0.1, "y": 0.9}, {"x": 0.15, "y": 0.85}, {"x": 0.2, "y": 0.8}],
+  "nodes": [{"id":"n1","index":0,"stageType":"nutrition","label":"Step ${startIndex + 1}","x":0.1,"y":0.9}],
+  "decor": [
+    {"assetId":"tree_big","x":0.3,"y":0.5,"scale":1.2,"layer":"back"},
+    {"assetId":"house_small","x":0.6,"y":0.4,"scale":1.0,"layer":"mid"},
+    {"assetId":"bridge","x":0.5,"y":0.6,"scale":0.9,"layer":"front"}
+  ],
   "character": {"skin":"explorer_default","x":0.1,"y":0.9},
-  "meta": {"source":"ai","seed":12345,"checklistCount":${Math.max(2, nodeCount)}}
+  "meta": {"source":"ai","seed":${Math.floor(Math.random() * 1000000)},"checklistCount":${Math.max(2, nodeCount)}}
 }`;
 }
 
 async function tryGenerateWithOpenAI(
   signals: ChecklistSignals,
-  nodeCount: number
+  nodeCount: number,
+  items: ChecklistLikeItem[],
+  startIndex: number
 ): Promise<any | null> {
   const enabled = process.env.USE_AI_MAP_GENERATION === 'true';
+  const provider = (process.env.AI_MAP_SPEC_PROVIDER || 'openai').toLowerCase();
   const apiKey = process.env.OPENAI_API_KEY;
-  if (!enabled || !apiKey) return null;
-
-  const model = process.env.OPENAI_MAP_MODEL || 'gpt-4.1-mini';
-  const response = await fetch('https://api.openai.com/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      model,
-      temperature: 0.5,
-      messages: [
-        { role: 'system', content: 'Return strict JSON only.' },
-        { role: 'user', content: buildMapPrompt(signals, nodeCount) },
-      ],
-    }),
-  });
-
-  if (!response.ok) {
-    const body = await response.text();
-    throw new Error(`OpenAI map generation failed: ${response.status} ${body}`);
+  if (!enabled || (provider === 'openai' && !apiKey)) {
+    console.log('AI map generation disabled or no API key');
+    return null;
   }
 
-  const payload: any = await response.json();
-  const content = payload?.choices?.[0]?.message?.content;
-  if (typeof content !== 'string') return null;
-
+  const model = process.env.OPENAI_MAP_MODEL || 'gpt-4.1-mini';
+  console.log(`Generating AI map with ${provider}:${model} for ${nodeCount} nodes starting at index ${startIndex}`);
+  
   try {
-    return JSON.parse(content);
-  } catch {
-    const match = content.match(/\{[\s\S]*\}/);
-    if (!match) return null;
-    return JSON.parse(match[0]);
+    let content: string = '';
+    const userPrompt = buildMapPrompt(signals, nodeCount, items, startIndex);
+    if (provider === 'sagemaker') {
+      const result = await invokeTextModel(
+        `You are a professional game map designer. Return ONLY valid JSON object.\n\n${userPrompt}`
+      );
+      content = result.text;
+    } else {
+      const response = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model,
+          temperature: 0.8,
+          response_format: { type: 'json_object' },
+          messages: [
+            {
+              role: 'system',
+              content: 'You are a professional game map designer. You MUST return ONLY valid JSON. No markdown, no code blocks, no explanations, no text outside the JSON object. Just the raw JSON object starting with { and ending with }.'
+            },
+            { role: 'user', content: userPrompt },
+          ],
+        }),
+      });
+
+      if (!response.ok) {
+        const body = await response.text();
+        console.error(`OpenAI API error: ${response.status}`, body);
+        throw new Error(`OpenAI map generation failed: ${response.status} ${body}`);
+      }
+
+      const payload: any = await response.json();
+      content = payload?.choices?.[0]?.message?.content;
+    }
+
+    if (typeof content !== 'string') {
+      console.error('Map generation returned non-string content');
+      return null;
+    }
+
+    // Try to parse JSON, handling markdown code blocks if present
+    let jsonContent = content.trim();
+    if (jsonContent.startsWith('```')) {
+      jsonContent = jsonContent.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '');
+    }
+
+    try {
+      const parsed = JSON.parse(jsonContent);
+      console.log('Successfully generated AI map');
+      return parsed;
+    } catch (parseError) {
+      console.error('Failed to parse OpenAI response as JSON, trying to extract JSON...', parseError);
+      // Try to extract JSON from the response
+      const match = jsonContent.match(/\{[\s\S]*\}/);
+      if (match) {
+        return JSON.parse(match[0]);
+      }
+      return null;
+    }
+  } catch (error) {
+    console.error('OpenAI map generation error:', error);
+    throw error;
   }
 }
 
+const MIN_STEPS_PER_MAP = 3;
+const MAX_STEPS_PER_MAP = 6;
+
 export async function generateMapSpecForChecklist(
-  items: ChecklistLikeItem[]
+  items: ChecklistLikeItem[],
+  startIndex: number = 0,
+  maxSteps: number = MAX_STEPS_PER_MAP
 ): Promise<{
   mapSpec: GeneratedMapSpec;
   source: 'ai' | 'fallback';
   signals: ChecklistSignals;
   validation: ValidationResult;
 }> {
-  const signals = deriveChecklistSignals(items);
-  const checklistCount = Math.max(2, signals.checklistCount || 2);
+  const itemsForMap = items.slice(startIndex, startIndex + maxSteps);
+  if (itemsForMap.length === 0) {
+    throw new Error('No items to generate map for');
+  }
 
-  const fallback = buildFallbackMapSpec(signals, checklistCount);
+  const signals = deriveChecklistSignals(itemsForMap);
+  const nodeCount = Math.min(Math.max(MIN_STEPS_PER_MAP, itemsForMap.length), maxSteps);
+
+  const fallback = buildFallbackMapSpec(signals, nodeCount);
   const fallbackPath = fallback.path;
 
   try {
-    const aiRaw = await tryGenerateWithOpenAI(signals, checklistCount);
+    const aiRaw = await tryGenerateWithOpenAI(signals, nodeCount, items, startIndex);
     if (!aiRaw) {
       return {
         mapSpec: fallback,
@@ -354,8 +441,16 @@ export async function generateMapSpecForChecklist(
       };
     }
 
-    const normalized = sanitizeAndValidateMapSpec(aiRaw, checklistCount, fallbackPath);
+    const normalized = sanitizeAndValidateMapSpec(aiRaw, nodeCount, fallbackPath);
     normalized.spec.meta.source = 'ai';
+    
+    // Update node labels to reflect actual step numbers
+    normalized.spec.nodes = normalized.spec.nodes.map((node, idx) => ({
+      ...node,
+      label: `Step ${startIndex + idx + 1}`,
+      stageType: itemsForMap[idx]?.category || node.stageType,
+    }));
+
     return {
       mapSpec: normalized.spec,
       source: 'ai',
@@ -363,6 +458,7 @@ export async function generateMapSpecForChecklist(
       validation: normalized.validation,
     };
   } catch (error) {
+    console.error('Map generation error:', error);
     return {
       mapSpec: fallback,
       source: 'fallback',
@@ -373,6 +469,50 @@ export async function generateMapSpecForChecklist(
       },
     };
   }
+}
+
+/**
+ * Generate multiple maps for a checklist, splitting into chunks of 3-6 steps
+ */
+export async function generateMapsForChecklist(
+  items: ChecklistLikeItem[]
+): Promise<Array<{
+  mapSpec: GeneratedMapSpec;
+  source: 'ai' | 'fallback';
+  signals: ChecklistSignals;
+  validation: ValidationResult;
+  startIndex: number;
+  endIndex: number;
+}>> {
+  const maps: Array<{
+    mapSpec: GeneratedMapSpec;
+    source: 'ai' | 'fallback';
+    signals: ChecklistSignals;
+    validation: ValidationResult;
+    startIndex: number;
+    endIndex: number;
+  }> = [];
+
+  let currentIndex = 0;
+  while (currentIndex < items.length) {
+    // Determine how many steps for this map (3-6, but don't exceed remaining items)
+    const remaining = items.length - currentIndex;
+    const stepsForThisMap = Math.min(
+      Math.max(MIN_STEPS_PER_MAP, Math.floor(Math.random() * (MAX_STEPS_PER_MAP - MIN_STEPS_PER_MAP + 1)) + MIN_STEPS_PER_MAP),
+      remaining
+    );
+
+    const result = await generateMapSpecForChecklist(items, currentIndex, stepsForThisMap);
+    maps.push({
+      ...result,
+      startIndex: currentIndex,
+      endIndex: currentIndex + stepsForThisMap - 1,
+    });
+
+    currentIndex += stepsForThisMap;
+  }
+
+  return maps;
 }
 
 

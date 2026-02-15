@@ -56,6 +56,10 @@ export const gameApi = {
   getLeaderboard: (limit?: number) =>
     api.get('/game/leaderboard', { params: { limit } }),
   getMapSpec: () => api.get('/game/map-spec'),
+  getCurrentMap: () => api.get('/game/current-map'),
+  getMap: (consultationId: string, mapIndex?: number) =>
+    api.get('/game/map', { params: { consultationId, mapIndex } }),
+  getConsultationsWithMaps: () => api.get('/game/consultations'),
 };
 
 export default api;
