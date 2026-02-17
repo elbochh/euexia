@@ -53,6 +53,9 @@ export default function GameCanvas({
   const renderSeqRef = useRef(0);
   const lastCompletedRef = useRef(0);
   const lastMapKeyRef = useRef('');
+  const scrollContainerRef = useRef<Container | null>(null);
+  const scrollYRef = useRef(0);
+  const maxScrollYRef = useRef(0);
 
   const hexToNumber = (hex: string, fallback: number): number => {
     if (!hex || !hex.startsWith('#')) return fallback;
@@ -225,16 +228,54 @@ export default function GameCanvas({
           // Load texture using Assets API (Pixi.js v8)
           const texture = await Assets.load(fullImageUrl);
           if (!isRenderActive()) return;
-          const mapSprite = new Sprite(texture);
           
-          // Scale to COVER canvas while maintaining aspect ratio (full-screen map feel)
-          const scale = Math.max(width / texture.width, height / texture.height);
-          mapSprite.scale.set(scale);
-          mapSprite.x = (width - texture.width * scale) / 2;
-          mapSprite.y = (height - texture.height * scale) / 2;
+          // Check if this is a scrollable map (tall vertical image)
+          const isScrollableMap = texture.height > texture.width * 1.2; // Portrait/tall image
           
-          app.stage.addChild(mapSprite);
-          hasImageBackground = true;
+          if (isScrollableMap) {
+            // Create scrollable container
+            const scrollContainer = new Container();
+            scrollContainerRef.current = scrollContainer;
+            
+            // Scale map to fit width, maintain aspect ratio
+            const scale = width / texture.width;
+            const mapSprite = new Sprite(texture);
+            mapSprite.scale.set(scale);
+            const mapHeight = texture.height * scale;
+            
+            // Position map at top of scroll container (y=0)
+            mapSprite.x = 0;
+            mapSprite.y = 0;
+            
+            scrollContainer.addChild(mapSprite);
+            
+            // Allow scrolling the full map height (more stretched)
+            // This ensures we can scroll from bottom (checkpoint 1) to top (last checkpoint)
+            maxScrollYRef.current = Math.max(0, mapHeight - height);
+            
+            // Start at bottom (checkpoint 1 visible) - scroll to show bottom of map
+            scrollYRef.current = maxScrollYRef.current;
+            scrollContainer.y = -scrollYRef.current;
+            
+            // Add mask to show only viewport (on stage, not scroll container)
+            const mask = new Graphics();
+            mask.rect(0, 0, width, height);
+            mask.fill(0xffffff);
+            app.stage.addChild(mask);
+            scrollContainer.mask = mask;
+            
+            app.stage.addChild(scrollContainer);
+            hasImageBackground = true;
+          } else {
+            // Regular map - scale to cover canvas
+            const mapSprite = new Sprite(texture);
+            const scale = Math.max(width / texture.width, height / texture.height);
+            mapSprite.scale.set(scale);
+            mapSprite.x = (width - texture.width * scale) / 2;
+            mapSprite.y = (height - texture.height * scale) / 2;
+            app.stage.addChild(mapSprite);
+            hasImageBackground = true;
+          }
         } catch (error) {
           console.error('Failed to load map image:', error);
           // Fall through to draw default background
@@ -355,8 +396,34 @@ export default function GameCanvas({
 
       // Draw dotted path connecting checkpoints (Clash of Clans style - enhanced)
       for (let i = 0; i < nodePoints.length - 1; i++) {
-        const p1 = { x: nodePoints[i].x * width, y: nodePoints[i].y * height };
-        const p2 = { x: nodePoints[i + 1].x * width, y: nodePoints[i + 1].y * height };
+        // Convert normalized coordinates to pixel coordinates
+        let p1x: number, p1y: number, p2x: number, p2y: number;
+        
+        if (scrollContainerRef.current) {
+          const mapImage = scrollContainerRef.current.children.find((child: any) => child instanceof Sprite) as Sprite | undefined;
+          if (mapImage) {
+            const mapWidth = mapImage.width;
+            const mapHeight = mapImage.height;
+            // y=1.0 is bottom of map, y=0.0 is top of map
+            p1x = nodePoints[i].x * mapWidth;
+            p1y = nodePoints[i].y * mapHeight; // y=1.0 → bottom, y=0.0 → top
+            p2x = nodePoints[i + 1].x * mapWidth;
+            p2y = nodePoints[i + 1].y * mapHeight;
+          } else {
+            p1x = nodePoints[i].x * width;
+            p1y = nodePoints[i].y * height;
+            p2x = nodePoints[i + 1].x * width;
+            p2y = nodePoints[i + 1].y * height;
+          }
+        } else {
+          p1x = nodePoints[i].x * width;
+          p1y = nodePoints[i].y * height;
+          p2x = nodePoints[i + 1].x * width;
+          p2y = nodePoints[i + 1].y * height;
+        }
+        
+        const p1 = { x: p1x, y: p1y };
+        const p2 = { x: p2x, y: p2y };
         
         const dx = p2.x - p1.x;
         const dy = p2.y - p1.y;
@@ -422,8 +489,26 @@ export default function GameCanvas({
       }
 
       nodePoints.forEach((point, index) => {
-        const cx = point.x * width;
-        const cy = point.y * height;
+        let cx: number, cy: number;
+        
+        if (scrollContainerRef.current) {
+          // For scrollable maps: coordinates are relative to map image
+          const mapImage = scrollContainerRef.current.children.find((child: any) => child instanceof Sprite) as Sprite | undefined;
+          if (mapImage) {
+            const mapWidth = mapImage.width;
+            const mapHeight = mapImage.height;
+            // y=1.0 is bottom of map, y=0.0 is top of map
+            cx = point.x * mapWidth;
+            cy = point.y * mapHeight; // y=1.0 → bottom, y=0.0 → top
+          } else {
+            cx = point.x * width;
+            cy = point.y * height;
+          }
+        } else {
+          // Regular map: coordinates relative to viewport
+          cx = point.x * width;
+          cy = point.y * height;
+        }
         const isCompleted = index < completed;
         const isCurrent = index === completed;
         const isLocked = index > completed;
@@ -434,17 +519,10 @@ export default function GameCanvas({
         checkpoint.cursor = 'pointer';
         checkpoint.on('pointertap', () => onCheckpointClick?.(index));
 
-        // Smooth shadow under the icon (multiple layers for smoothness)
+        // Low elevated shadow under the icon (subtle but visible)
         const shadowGraphics = new Graphics();
-        // Outer shadow (soft, large) - scaled up for bigger icon
-        shadowGraphics.circle(0, 3, 48);
-        shadowGraphics.fill({ color: 0x000000, alpha: 0.15 });
-        // Middle shadow
-        shadowGraphics.circle(0, 2.5, 42);
-        shadowGraphics.fill({ color: 0x000000, alpha: 0.25 });
-        // Inner shadow (sharp, close)
-        shadowGraphics.circle(0, 2, 36);
-        shadowGraphics.fill({ color: 0x000000, alpha: 0.35 });
+        shadowGraphics.circle(0, 2, 22);
+        shadowGraphics.fill({ color: 0x000000, alpha: 0.18 });
         checkpoint.addChild(shadowGraphics);
 
         // Outer glow ring for current/active checkpoint (separate container for animation)
@@ -544,8 +622,14 @@ export default function GameCanvas({
         }
       });
 
-      app.stage.addChild(pathContainer);
-      app.stage.addChild(decorFront);
+      // Add path and checkpoints to scroll container if scrollable, otherwise to stage
+      if (scrollContainerRef.current) {
+        scrollContainerRef.current.addChild(pathContainer);
+        scrollContainerRef.current.addChild(decorFront);
+      } else {
+        app.stage.addChild(pathContainer);
+        app.stage.addChild(decorFront);
+      }
 
       // Player character - detailed animated character
       const player = new Container();
@@ -560,11 +644,9 @@ export default function GameCanvas({
 
       // Shadow with blur effect
       const playerShadow = new Graphics();
-      playerShadow.ellipse(0, 0, 14, 7);
-      playerShadow.fill({ color: 0x000000, alpha: 0.35 });
-      playerShadow.ellipse(0, 0, 12, 6);
+      playerShadow.ellipse(0, 0, 10, 5);
       playerShadow.fill({ color: 0x000000, alpha: 0.2 });
-      playerShadow.position.set(0, 22);
+      playerShadow.position.set(0, 0);
       player.addChild(playerShadow);
 
       // Legs
@@ -714,9 +796,9 @@ export default function GameCanvas({
         player.removeChildren();
 
         const playerShadow = new Graphics();
-        playerShadow.ellipse(0, 0, 18, 8);
-        playerShadow.fill({ color: 0x000000, alpha: 0.28 });
-        playerShadow.position.set(0, 8);
+        playerShadow.ellipse(0, 0, 10, 5);
+        playerShadow.fill({ color: 0x000000, alpha: 0.2 });
+        playerShadow.position.set(0, 0);
         player.addChild(playerShadow);
 
         const playerBacklight = new Graphics();
@@ -738,7 +820,12 @@ export default function GameCanvas({
         player.addChild(playerSprite);
       }
 
-      app.stage.addChild(player);
+      // Add player to scroll container if scrollable, otherwise to stage
+      if (scrollContainerRef.current) {
+        scrollContainerRef.current.addChild(player);
+      } else {
+        app.stage.addChild(player);
+      }
 
       // Doctor consultant character (always on right middle)
       const doctor = new Container();
@@ -757,9 +844,9 @@ export default function GameCanvas({
 
       // Doctor shadow
       const doctorShadow = new Graphics();
-      doctorShadow.ellipse(0, 0, 16, 8);
-      doctorShadow.fill({ color: 0x000000, alpha: 0.3 });
-      doctorShadow.position.set(0, 28);
+      doctorShadow.ellipse(0, 0, 10, 5);
+      doctorShadow.fill({ color: 0x000000, alpha: 0.2 });
+      doctorShadow.position.set(0, 0);
       doctor.addChild(doctorShadow);
 
       // Doctor body (white coat)
@@ -897,9 +984,9 @@ export default function GameCanvas({
         doctor.addChild(clickableGlow);
 
         const doctorShadow = new Graphics();
-        doctorShadow.ellipse(0, 0, 18, 8);
-        doctorShadow.fill({ color: 0x000000, alpha: 0.28 });
-        doctorShadow.position.set(0, 8);
+        doctorShadow.ellipse(0, 0, 10, 5);
+        doctorShadow.fill({ color: 0x000000, alpha: 0.2 });
+        doctorShadow.position.set(0, 0);
         doctor.addChild(doctorShadow);
 
         const doctorBacklight = new Graphics();
@@ -939,6 +1026,7 @@ export default function GameCanvas({
       doctorContainer.position.set(doctorX, doctorY);
       doctorContainer.addChild(doctor);
       doctorContainer.zIndex = 1000; // Ensure doctor is always visible
+      // Doctor stays on stage (fixed position, not scrollable)
       app.stage.addChild(doctorContainer);
 
       const currentIdx = Math.max(0, Math.min(completed, nodePoints.length - 1));
@@ -962,8 +1050,32 @@ export default function GameCanvas({
 
       // Pick the best side around a node so full character remains visible.
       const getPlayerFootForNode = (node: { x: number; y: number }) => {
-        const cx = node.x * width;
-        const cy = node.y * height;
+        let cx: number, cy: number;
+        
+        if (scrollContainerRef.current) {
+          // For scrollable maps: node coordinates are relative to map image (normalized 0-1)
+          // Map image is scaled to fit width, positioned at y=0 in scroll container
+          const mapImage = scrollContainerRef.current.children.find((child: any) => child instanceof Sprite) as Sprite | undefined;
+          if (mapImage) {
+            const mapWidth = mapImage.width;
+            const mapHeight = mapImage.height;
+            // y=1.0 is bottom of map, y=0.0 is top of map
+            // Map is at y=0 in scroll container, so node position is:
+            cx = node.x * mapWidth;
+            cy = node.y * mapHeight; // y=1.0 → bottom, y=0.0 → top
+            // Add scroll offset to get viewport-relative position
+            cy += scrollContainerRef.current.y;
+          } else {
+            // Fallback
+            cx = node.x * width;
+            cy = node.y * height;
+          }
+        } else {
+          // Regular map: coordinates relative to viewport
+          cx = node.x * width;
+          cy = node.y * height;
+        }
+        
         const candidates = [
           { x: cx - 54, y: cy + 10, pref: 1.0 }, // left (preferred)
           { x: cx + 54, y: cy + 10, pref: 0.85 }, // right
@@ -1212,6 +1324,47 @@ export default function GameCanvas({
       const themeData = getTheme(theme);
       drawMap(app, themeData, completedCount, totalCount, mapSpec, mapImageUrl).catch(console.error);
 
+      // Add touch/scroll handlers for scrollable maps
+      let touchStartY = 0;
+      let isDragging = false;
+      
+      const handleTouchStart = (e: TouchEvent) => {
+        if (scrollContainerRef.current) {
+          touchStartY = e.touches[0].clientY;
+          isDragging = true;
+        }
+      };
+      
+      const handleTouchMove = (e: TouchEvent) => {
+        if (!isDragging || !scrollContainerRef.current) return;
+        e.preventDefault();
+        const deltaY = touchStartY - e.touches[0].clientY;
+        touchStartY = e.touches[0].clientY;
+        scrollYRef.current = Math.max(0, Math.min(maxScrollYRef.current, scrollYRef.current + deltaY));
+        scrollContainerRef.current.y = -scrollYRef.current;
+      };
+      
+      const handleTouchEnd = () => {
+        isDragging = false;
+      };
+      
+      const handleWheel = (e: WheelEvent) => {
+        if (scrollContainerRef.current) {
+          e.preventDefault();
+          scrollYRef.current = Math.max(0, Math.min(maxScrollYRef.current, scrollYRef.current + e.deltaY));
+          scrollContainerRef.current.y = -scrollYRef.current;
+        }
+      };
+      
+      const canvas = app.canvas as HTMLCanvasElement;
+      canvas.addEventListener('touchstart', handleTouchStart, { passive: false });
+      canvas.addEventListener('touchmove', handleTouchMove, { passive: false });
+      canvas.addEventListener('touchend', handleTouchEnd);
+      canvas.addEventListener('wheel', handleWheel, { passive: false });
+      
+      // Store handlers for cleanup
+      (app as any).__touchHandlers = { handleTouchStart, handleTouchMove, handleTouchEnd, handleWheel };
+
       // Add resize observer for container
       const resizeObserver = new ResizeObserver(() => {
         updateSize();
@@ -1248,6 +1401,15 @@ export default function GameCanvas({
         if ((appRef.current as any).__resizeHandler) {
           window.removeEventListener('resize', (appRef.current as any).__resizeHandler);
           window.removeEventListener('orientationchange', (appRef.current as any).__resizeHandler);
+        }
+        // Clean up touch/scroll handlers
+        if ((appRef.current as any).__touchHandlers) {
+          const canvas = appRef.current.canvas as HTMLCanvasElement;
+          const handlers = (appRef.current as any).__touchHandlers;
+          canvas.removeEventListener('touchstart', handlers.handleTouchStart);
+          canvas.removeEventListener('touchmove', handlers.handleTouchMove);
+          canvas.removeEventListener('touchend', handlers.handleTouchEnd);
+          canvas.removeEventListener('wheel', handlers.handleWheel);
         }
         appRef.current.destroy(true);
         appRef.current = null;

@@ -17,7 +17,7 @@ async function main() {
 
     const templates = await MapThemeTemplate.find({}, { mapImagePath: 1, themeKey: 1, stepCount: 1 }).lean();
     const maps = await Map.find({}, { mapImagePath: 1 }).lean();
-    console.log(`Found ${templates.length} theme template records.`);clearScreenDown
+    console.log(`Found ${templates.length} theme template records.`);
     console.log(`Found ${maps.length} map records.`);
 
     let deletedLocalFiles = 0;

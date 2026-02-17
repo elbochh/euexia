@@ -284,7 +284,8 @@ function buildImagePrompt(
   items: ChecklistItemLike[],
   themeProfile?: ThemeProfile,
   _context?: string,
-  stepCount?: number
+  stepCount?: number,
+  isScrollableMap?: boolean
 ): string {
   const profile = themeProfile || analyzeChecklistTheme(items);
   const { themeKeywords, specialty } = profile;
@@ -316,6 +317,41 @@ function buildImagePrompt(
   const keywords = themeKeywords.slice(0, 5).join(', ');
   const checkpointCount = stepCount || Math.max(2, items.length);
 
+  // Check if this is a scrollable map (all checkpoints in one tall image)
+  const isScrollable = (stepCount || 0) > 6; // Assume scrollable if more than 6 checkpoints
+  
+  if (isScrollable) {
+    return `Create a vibrant, optimistic TALL VERTICAL SCROLLABLE game map (like Clash of Clans campaign map) that spans from bottom to top.
+
+CRITICAL LAYOUT REQUIREMENTS FOR SCROLLABLE MAP:
+- VERTICAL ORIENTATION: Map must be TALL and VERTICAL (portrait orientation)
+- FULL HEIGHT SPAN: The map should span the ENTIRE height from bottom edge to top edge
+- CHECKPOINT DISTRIBUTION: Distribute ${stepCount} checkpoints evenly along the FULL HEIGHT of the map, starting from the BOTTOM (checkpoint 1) and progressing upward to the TOP (checkpoint ${stepCount})
+- BOTTOM TO TOP PROGRESSION: Checkpoint 1 should be at the bottom of the image, checkpoint ${stepCount} should be at the top
+- PATH CONNECTS ALL: A single winding path should connect all checkpoints from bottom to top, spanning the full height
+- HIGHLY ZOOMED OUT: The map should be zoomed out enough to show the entire journey from start (bottom) to finish (top)
+- NO PATH DOTS: Do NOT draw connecting dots, lines, or path patterns - just show the terrain path itself
+- CHECKPOINT MARKERS: Show ${stepCount} distinct circular areas or clear landing spots where milestone coins will be placed, evenly distributed along the vertical path from bottom to top
+
+REFERENCE STYLE:
+- Similar to Clash of Clans campaign map: top-down view, highly zoomed out, tall vertical format
+- Parchment/textured background feel
+- Single continuous map that can be scrolled vertically
+- Path winds from bottom to top connecting all checkpoints
+
+THEME REQUIREMENTS (CRITICAL - MUST FOLLOW):
+- Theme: ${specialty}
+- Keywords: ${keywords}
+- World made of: ${worldMaterial}
+- The ENTIRE terrain/landscape must be constructed from ${specialty}-themed elements
+- Place ${specialty}-themed structures, formations, and elements throughout the map
+- DO NOT include medical equipment or elements unrelated to ${specialty}
+- For example: If theme is dentistry, the ENTIRE map terrain should be made of teeth, dental tools, oral care elements - NO inhalers, NO blood pressure machines, NO unrelated medical devices
+- The landscape itself (ground, terrain features, structures) must be ${specialty}-themed
+
+STYLE: Top-down game map view, vibrant, colorful, optimistic, high-detail. Bright lighting, positive energy. NO traditional vegetation, NO people, NO text labels, NO path dots, NO connection lines, NO unrelated medical equipment. Pure themed landscape map with ${specialty} theme only. The map should be designed to be scrolled vertically, with checkpoint 1 at the bottom and the final checkpoint at the top.`;
+  }
+  
   return `Create a vibrant, optimistic TOP-DOWN ZOOMED-OUT game map view showing multiple checkpoints/stages across a themed landscape.
 
 CRITICAL LAYOUT REQUIREMENTS:
@@ -361,6 +397,7 @@ export async function generateMapImage(
     rawContext?: string;
     previousImagePath?: string;
     continuationLevel?: number;
+    isScrollableMap?: boolean;
   } = {}
 ): Promise<{ imagePath: string; imageUrl: string; imageBuffer?: Buffer } | null> {
   const enabled = process.env.USE_AI_MAP_GENERATION === 'true';
@@ -375,7 +412,7 @@ export async function generateMapImage(
     const effectiveTheme = params.themeProfile || analyzeChecklistTheme(items);
     const stepCount = params.stepCount || Math.max(2, items.length);
     // Don't pass context - only use theme for image generation
-    let prompt = buildImagePrompt(signals, items, effectiveTheme, undefined, stepCount);
+    let prompt = buildImagePrompt(signals, items, effectiveTheme, undefined, stepCount, params.isScrollableMap);
     const themeKey = params.themeKey || effectiveTheme.themeKey;
     const imageModel = process.env.OPENAI_IMAGE_MODEL || 'gpt-image-1';
 
@@ -448,10 +485,13 @@ export async function generateMapImage(
         ? fs.readFileSync(params.previousImagePath)
         : undefined;
 
+    // Use tall vertical size for scrollable maps, standard for regular maps
+    const imageSize = params.isScrollableMap ? '1024x1536' : '1024x1536'; // Both use vertical for now
+    
     const generated = await invokeImageGenerationModel({
       prompt,
       previousImageBuffer,
-      size: '1024x1536', // Vertical/portrait orientation for mobile (supported by DALL-E)
+      size: imageSize,
       quality: imageModel === 'gpt-image-1' ? 'high' : 'standard',
     });
 
@@ -487,6 +527,66 @@ export async function generateMapImage(
     console.error('Map image generation error:', error);
     return null;
   }
+}
+
+/**
+ * Generate checkpoint positions algorithmically for a scrollable map
+ * Distributes checkpoints vertically with randomization
+ */
+export function generateScrollableMapCheckpoints(
+  stepCount: number,
+  items: ChecklistItemLike[]
+): { path: MapPoint[]; nodes: MapNode[] } {
+  const nodes: MapNode[] = [];
+  const path: MapPoint[] = [];
+  
+  // Generate nodes distributed vertically from bottom (y=1.0) to top (y=0.0)
+  for (let i = 0; i < stepCount; i++) {
+    // Base y position: evenly distributed from bottom to top
+    // y=1.0 is bottom, y=0.0 is top
+    const baseY = 1.0 - (i / (stepCount - 1 || 1)); // Distribute from 1.0 to 0.0
+    
+    // Add randomization to y position (±5% of spacing)
+    const spacing = 1.0 / (stepCount - 1 || 1);
+    const yRandomization = (Math.random() - 0.5) * spacing * 0.3; // ±15% of spacing
+    const y = Math.max(0.0, Math.min(1.0, baseY + yRandomization));
+    
+    // Randomize x position: center around 0.5 with variation (±30%)
+    const xBase = 0.5;
+    const xVariation = (Math.random() - 0.5) * 0.3; // ±15% variation
+    const x = Math.max(0.15, Math.min(0.85, xBase + xVariation));
+    
+    nodes.push({
+      id: `checkpoint-${i}`,
+      index: i,
+      x,
+      y,
+      label: items[i]?.title || `Step ${i + 1}`,
+      stageType: items[i]?.category || 'general',
+    });
+    
+    // Add path points between nodes for smooth path
+    if (i > 0) {
+      const prevNode = nodes[i - 1];
+      // Add 2-3 intermediate path points between nodes
+      const numPathPoints = 3;
+      for (let j = 1; j < numPathPoints; j++) {
+        const t = j / numPathPoints;
+        const pathX = prevNode.x + (x - prevNode.x) * t;
+        const pathY = prevNode.y + (y - prevNode.y) * t;
+        // Add slight curve to path
+        const curveOffset = (Math.sin(t * Math.PI) - 0.5) * 0.05;
+        path.push({
+          x: pathX + curveOffset,
+          y: pathY,
+        });
+      }
+    }
+    // Add the node itself as a path point
+    path.push({ x, y });
+  }
+  
+  return { path, nodes };
 }
 
 /**
@@ -547,7 +647,8 @@ export function buildMapSpecFromAnalysis(
 export async function analyzeMapImageForCheckpoints(
   imageBuffer: Buffer,
   stepCount: number,
-  items: ChecklistItemLike[]
+  items: ChecklistItemLike[],
+  isScrollableMap?: boolean
 ): Promise<{ path: MapPoint[]; nodes: MapNode[] } | null> {
   // ALWAYS use OpenAI Vision for map analysis (not SageMaker/MedGemma)
   // Map images are game maps, not medical images, so they should use OpenAI Vision
@@ -565,6 +666,22 @@ export async function analyzeMapImageForCheckpoints(
     
     const itemsList = items.map((item, idx) => `  ${idx + 1}. ${item.title || `Step ${idx + 1}`}`).join('\n');
     
+    const scrollableInstructions = isScrollableMap ? `
+CRITICAL FOR SCROLLABLE MAP:
+- This is a TALL VERTICAL SCROLLABLE map (portrait orientation)
+- Checkpoints MUST be distributed along the FULL HEIGHT from BOTTOM to TOP
+- Checkpoint 1 (index 0) should be at the BOTTOM of the image (y ≈ 0.9-1.0)
+- Checkpoint ${stepCount} (index ${stepCount - 1}) should be at the TOP of the image (y ≈ 0.0-0.1)
+- Checkpoints should be evenly distributed along the vertical path from bottom to top
+- The path should wind from bottom to top, connecting all checkpoints
+- x-coordinates can vary (path can wind left/right) but should stay roughly centered (x ≈ 0.3-0.7)
+` : `
+CRITICAL FOR REGULAR MAP:
+- Checkpoints should be distributed across the map area in a logical progression pattern
+- The first checkpoint (index 0) is typically near one edge/corner
+- The last checkpoint (index ${stepCount - 1}) is typically near the opposite edge/corner
+`;
+
     const prompt = `You are analyzing a medical journey map image. This image shows a TOP-DOWN ZOOMED-OUT game map view with multiple checkpoints/stages visible across the terrain (like Clash of Clans campaign map style).
 
 CRITICAL REQUIREMENTS:
@@ -572,17 +689,16 @@ CRITICAL REQUIREMENTS:
 2. You MUST identify ${stepCount} checkpoint/stage locations distributed across the map
 3. Each checkpoint corresponds to a step in the journey:
 ${itemsList}
-4. Checkpoints should be distributed across the map in a logical progression pattern (typically from one corner/edge to another)
+4. Checkpoints should be distributed across the map in a logical progression pattern${isScrollableMap ? ' from BOTTOM to TOP' : ' (typically from one corner/edge to another)'}
 5. Checkpoints can be positioned at interesting terrain features, structures, or landmarks visible in the map
+${scrollableInstructions}
 
 COORDINATE SYSTEM:
 - The image is a TOP-DOWN view (bird's eye perspective looking down)
 - Coordinates are normalized (0.0 to 1.0) where:
   - x: 0.0 = left edge of image, 1.0 = right edge of image
   - y: 0.0 = top edge of image, 1.0 = bottom edge of image (y increases downward)
-- Checkpoints should be distributed across the map area, not just along a single path
-- The first checkpoint (index 0) is typically near one edge/corner
-- The last checkpoint (index ${stepCount - 1}) is typically near the opposite edge/corner
+${isScrollableMap ? '- For scrollable maps: Checkpoint 1 at bottom (y ≈ 1.0), final checkpoint at top (y ≈ 0.0)' : '- Checkpoints should be distributed across the map area, not just along a single path'}
 
 NODE PLACEMENT RULES:
 - The first node (index 0) should be positioned at a starting location (typically bottom-left or bottom-center, y ~0.7-0.9)

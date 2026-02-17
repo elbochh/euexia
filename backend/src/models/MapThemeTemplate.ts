@@ -23,7 +23,7 @@ const MapThemeTemplateSchema = new Schema<IMapThemeTemplate>(
   {
     themeKey: { type: String, required: true, trim: true, lowercase: true },
     specialty: { type: String, required: true, trim: true },
-    stepCount: { type: Number, required: true, min: 2, max: 12 },
+    stepCount: { type: Number, required: true, min: 2 }, // No max limit for scrollable maps
     mapSpec: { type: Schema.Types.Mixed, required: true },
     mapImageUrl: { type: String, required: true },
     mapImagePath: { type: String, default: '' },
