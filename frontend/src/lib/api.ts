@@ -62,5 +62,13 @@ export const gameApi = {
   getConsultationsWithMaps: () => api.get('/game/consultations'),
 };
 
+// Doctor chat
+export const chatApi = {
+  getHistory: (consultationId?: string, limit: number = 40) =>
+    api.get('/chat', { params: { consultationId, limit } }),
+  sendMessage: (message: string, consultationId?: string) =>
+    api.post('/chat/message', { message, consultationId }),
+};
+
 export default api;
 

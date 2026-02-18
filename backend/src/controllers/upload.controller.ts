@@ -19,16 +19,23 @@ import {
   detectThemeWithOpenAI,
   generateMapImage,
   getFallbackMapImage,
-  analyzeMapImageForCheckpoints,
   buildMapSpecFromAnalysis,
   generateScrollableMapCheckpoints,
   PROMPT_VERSION,
 } from '../services/mapImageGenerator';
+import { indexConsultationContext } from '../services/rag/indexer';
 import fs from 'fs';
 import path from 'path';
 
 /**
- * Create a new consultation and process all uploads through the AI pipeline
+ * Create a new consultation and process all uploads through the AI pipeline.
+ *
+ * Pipeline (optimised for speed):
+ *  1. Process all uploads in PARALLEL (voice/image/text/pdf)
+ *  2. Aggregate summaries
+ *  3. Run structureChecklist + detectTheme in PARALLEL
+ *  4. Save checklist items → return response to user immediately
+ *  5. Generate maps in BACKGROUND (fire-and-forget)
  */
 export const createConsultation = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
@@ -81,8 +88,14 @@ export const createConsultation = async (req: AuthRequest, res: Response): Promi
     consultation.aggregatedSummary = summaries.join('\n\n---\n\n');
     consultation.checklistParagraph = checklistParagraph;
 
-    // Structure the paragraph into JSON checklist items
-    const checklistData = await structureChecklist(checklistParagraph);
+    // ── OPTIMIZATION: Run structureChecklist + detectTheme in PARALLEL ──
+    // Both only need checklistParagraph, so they can run simultaneously
+    console.log(`Running structureChecklist + detectTheme in parallel...`);
+    const [checklistData, consultationTheme] = await Promise.all([
+      structureChecklist(checklistParagraph),
+      detectThemeWithOpenAI([], checklistParagraph), // rawContext is sufficient for theme detection
+    ]);
+    
     console.log(`\n=== CHECKLIST ITEMS GENERATED ===`);
     console.log(`Generated ${checklistData.length} checklist items from GPT for consultation ${consultation._id}`);
     console.log(`\nFull checklist items JSON that will be saved to DB:`);
@@ -91,38 +104,61 @@ export const createConsultation = async (req: AuthRequest, res: Response): Promi
     console.log(checklistParagraph);
     console.log(`===================================\n`);
 
-    // Save checklist items to database
+    // Save checklist items to database with computed timing
+    const now = new Date();
     const checklistItems = await ChecklistItem.insertMany(
-      checklistData.map((item, index) => ({
-        consultationId: consultation._id,
-        userId,
-        title: item.title,
-        description: item.description,
-        frequency: item.frequency,
-        category: item.category,
-        xpReward: item.xpReward || 10,
-        coinReward: item.coinReward || 5,
-        order: index,
-      }))
+      checklistData.map((item, index) => {
+        const unlockAfterMs = (item.unlockAfterHours || 0) * 60 * 60 * 1000;
+        const unlockAt = unlockAfterMs > 0 ? new Date(now.getTime() + unlockAfterMs) : null;
+        const cooldownMinutes = (item.cooldownHours || 0) * 60;
+        const durationDays = item.durationDays || 0;
+        const expiresAt = durationDays > 0 ? new Date(now.getTime() + durationDays * 24 * 60 * 60 * 1000) : null;
+
+        return {
+          consultationId: consultation._id,
+          userId,
+          title: item.title,
+          description: item.description,
+          frequency: item.frequency,
+          category: item.category,
+          xpReward: item.xpReward || 10,
+          coinReward: item.coinReward || 5,
+          order: index,
+          // Timing fields
+          unlockAt,
+          cooldownMinutes,
+          nextDueAt: unlockAt, // first due = unlock time (null means available now)
+          totalRequired: item.totalRequired ?? 1,
+          completionCount: 0,
+          durationDays,
+          expiresAt,
+          timeOfDay: item.timeOfDay || 'any',
+          isFullyDone: false,
+        };
+      })
     );
     console.log(`Saved ${checklistItems.length} checklist items to database for consultation ${consultation._id}`);
 
-    // Generate maps for this consultation (split into multiple maps if needed)
-    console.log(`Generating maps for consultation ${consultation._id} with ${checklistItems.length} items`);
+    // Save consultation (with summaries) before map generation
+    await consultation.save();
+
+    // Fire-and-forget context indexing for adaptive RAG retrieval.
+    indexConsultationContext(userId, consultation._id.toString()).catch((err) =>
+      console.warn('[RAG] Failed to index consultation context:', err)
+    );
+
+    // Build items data for map generation and theme detection
     const checklistItemsData = checklistItems.map((item) => ({
       category: item.category,
       title: item.title,
       description: item.description,
     }));
     
-    // Detect ONE consultation-wide specialty theme via GPT-4o-mini for consistency across all maps
     console.log(`\n=== THEME DETECTION ===`);
     console.log(`Raw consultation context for theme detection:`);
     console.log(checklistParagraph);
     console.log(`\nChecklist items data for theme detection:`);
     console.log(JSON.stringify(checklistItemsData, null, 2));
-    
-    const consultationTheme = await detectThemeWithOpenAI(checklistItemsData, checklistParagraph);
     
     console.log(`\nDetected theme:`);
     console.log(JSON.stringify(consultationTheme, null, 2));

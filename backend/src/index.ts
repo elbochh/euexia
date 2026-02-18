@@ -10,6 +10,7 @@ import authRoutes from './routes/auth.routes';
 import uploadRoutes from './routes/upload.routes';
 import checklistRoutes from './routes/checklist.routes';
 import gameRoutes from './routes/game.routes';
+import chatRoutes from './routes/chat.routes';
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -32,6 +33,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/upload', uploadRoutes);
 app.use('/api/checklist', checklistRoutes);
 app.use('/api/game', gameRoutes);
+app.use('/api/chat', chatRoutes);
 
 // Health check
 app.get('/api/health', (_req, res) => {

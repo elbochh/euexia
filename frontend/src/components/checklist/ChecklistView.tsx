@@ -6,10 +6,23 @@ import { motion } from 'framer-motion';
 export default function ChecklistView() {
   const { checklist, completeItem, isLoading } = useGameStore();
 
-  const pending = checklist.filter((i) => !i.isCompleted);
-  const completed = checklist.filter((i) => i.isCompleted);
-  const progress = checklist.length > 0
-    ? Math.round((completed.length / checklist.length) * 100)
+  // Separate items into groups based on their timing state
+  const available = checklist.filter(
+    (i) => i.isAvailable && !i.isCompleted && !i.isFullyDone
+  );
+  const lockedOrCooldown = checklist.filter(
+    (i) => (i.isLocked || i.isOnCooldown) && !i.isFullyDone
+  );
+  const completedThisCycle = checklist.filter(
+    (i) => i.isCompleted && !i.isFullyDone && !i.isOnCooldown && !i.isLocked
+  );
+  const fullyDone = checklist.filter((i) => i.isFullyDone);
+  const expired = checklist.filter((i) => i.isExpired && !i.isFullyDone);
+
+  const totalDone = fullyDone.length + completedThisCycle.length;
+  const progress =
+    checklist.length > 0
+      ? Math.round((totalDone / checklist.length) * 100)
     : 0;
 
   if (isLoading) {
@@ -45,7 +58,7 @@ export default function ChecklistView() {
         <div className="flex items-center justify-between mb-2">
           <span className="text-sm font-semibold">Quest Progress</span>
           <span className="text-sm text-blue-300">
-            {completed.length}/{checklist.length}
+            {totalDone}/{checklist.length}
           </span>
         </div>
         <div className="h-3 bg-gray-800 rounded-full overflow-hidden">
@@ -61,13 +74,13 @@ export default function ChecklistView() {
         <div className="text-center mt-1 text-xs text-gray-500">{progress}% Complete</div>
       </div>
 
-      {/* Pending Items */}
-      {pending.length > 0 && (
+      {/* Available Now */}
+      {available.length > 0 && (
         <div className="mb-6">
           <h3 className="text-sm font-bold text-blue-300 mb-3 px-1">
-            ⚔️ Active Quests ({pending.length})
+            ⚔️ Available Now ({available.length})
           </h3>
-          {pending.map((item, i) => (
+          {available.map((item, i) => (
             <ChecklistItem
               key={item._id}
               item={item}
@@ -78,13 +91,64 @@ export default function ChecklistView() {
         </div>
       )}
 
-      {/* Completed Items */}
-      {completed.length > 0 && (
-        <div>
-          <h3 className="text-sm font-bold text-green-300 mb-3 px-1">
-            ✨ Completed ({completed.length})
+      {/* Locked / On Cooldown */}
+      {lockedOrCooldown.length > 0 && (
+        <div className="mb-6">
+          <h3 className="text-sm font-bold text-orange-300 mb-3 px-1">
+            ⏳ Coming Up ({lockedOrCooldown.length})
           </h3>
-          {completed.map((item, i) => (
+          {lockedOrCooldown.map((item, i) => (
+            <ChecklistItem
+              key={item._id}
+              item={item}
+              index={i}
+              onComplete={completeItem}
+            />
+          ))}
+        </div>
+      )}
+
+      {/* Completed this cycle (recurring items that are done for now) */}
+      {completedThisCycle.length > 0 && (
+        <div className="mb-6">
+          <h3 className="text-sm font-bold text-green-300 mb-3 px-1">
+            ✅ Done for Now ({completedThisCycle.length})
+          </h3>
+          {completedThisCycle.map((item, i) => (
+            <ChecklistItem
+              key={item._id}
+              item={item}
+              index={i}
+              onComplete={completeItem}
+            />
+          ))}
+        </div>
+      )}
+
+      {/* Fully Completed */}
+      {fullyDone.length > 0 && (
+        <div className="mb-6">
+          <h3 className="text-sm font-bold text-emerald-300 mb-3 px-1">
+            ★ Fully Completed ({fullyDone.length})
+          </h3>
+          {fullyDone.map((item, i) => (
+            <ChecklistItem
+              key={item._id}
+              item={item}
+              index={i}
+              onComplete={completeItem}
+            />
+          ))}
+        </div>
+      )}
+
+      {/* Expired */}
+      {expired.length > 0 && (
+        <div>
+          <h3 className="text-sm font-bold text-red-300 mb-3 px-1">
+            ⛔ Expired ({expired.length})
+          </h3>
+          {expired.map((item, i) => (
             <ChecklistItem
               key={item._id}
               item={item}
@@ -97,4 +161,3 @@ export default function ChecklistView() {
     </div>
   );
 }
-

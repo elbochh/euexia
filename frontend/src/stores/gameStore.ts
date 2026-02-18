@@ -36,6 +36,22 @@ interface ChecklistItem {
   coinReward: number;
   category: string;
   order: number;
+  // Timing fields (computed by backend)
+  unlockAt: string | null;
+  cooldownMinutes: number;
+  totalRequired: number;
+  completionCount: number;
+  durationDays: number;
+  expiresAt: string | null;
+  timeOfDay: string;
+  isFullyDone: boolean;
+  // Computed by backend addTimingInfo
+  isLocked: boolean;
+  isOnCooldown: boolean;
+  isExpired: boolean;
+  isAvailable: boolean;
+  remainingSeconds: number;
+  completionProgress: string | null;
 }
 
 interface RewardPopup {
@@ -237,12 +253,13 @@ export const useGameStore = create<GameStore>((set, get) => ({
     try {
       const res = await checklistApi.complete(itemId);
       const reward: RewardPopup = res.data.reward;
+      const updatedItem = res.data.item;
 
-      // Update checklist item locally
+      // Update checklist item locally with the full item from the server
       set((state) => ({
         checklist: state.checklist.map((item) =>
           item._id === itemId
-            ? { ...item, isCompleted: true, completedAt: new Date().toISOString() }
+            ? { ...item, ...updatedItem }
             : item
         ),
         rewardPopup: reward,
@@ -260,7 +277,28 @@ export const useGameStore = create<GameStore>((set, get) => ({
       }));
 
       return reward;
-    } catch (error) {
+    } catch (error: any) {
+      // Handle timing constraint errors from the backend
+      const errData = error?.response?.data;
+      if (errData && (errData.error === 'locked' || errData.error === 'cooldown' || errData.error === 'expired')) {
+        // Update the item's timing state locally
+        set((state) => ({
+          checklist: state.checklist.map((item) =>
+            item._id === itemId
+              ? {
+                  ...item,
+                  isLocked: errData.error === 'locked',
+                  isOnCooldown: errData.error === 'cooldown',
+                  isExpired: errData.error === 'expired',
+                  isAvailable: false,
+                  remainingSeconds: errData.remainingSeconds || 0,
+                }
+              : item
+          ),
+        }));
+        // Return null but don't log as error — this is expected behavior
+        return null;
+      }
       console.error('Failed to complete item:', error);
       return null;
     }

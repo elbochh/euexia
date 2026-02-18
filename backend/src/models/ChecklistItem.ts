@@ -6,13 +6,28 @@ export interface IChecklistItem extends Document {
   title: string;
   description: string;
   frequency: string;
-  nextDueAt: Date | null;
-  isCompleted: boolean;
+
+  // Scheduling / timing
+  unlockAt: Date | null;         // when this item first becomes available to check
+  cooldownMinutes: number;       // minutes between recurring completions (0 = one-time)
+  nextDueAt: Date | null;        // when the item can next be completed (after cooldown)
+  totalRequired: number;         // total completions needed (1 = one-time, 0 = ongoing)
+  completionCount: number;       // how many times completed so far
+  durationDays: number;          // how many days this task is relevant (0 = indefinite)
+  expiresAt: Date | null;        // calculated: createdAt + durationDays
+  timeOfDay: string;             // preferred time: "morning", "afternoon", "evening", "night", "any"
+
+  // Status
+  isCompleted: boolean;          // fully done (one-time) or current cycle done (recurring)
   completedAt: Date | null;
+  isFullyDone: boolean;          // true when completionCount >= totalRequired (and totalRequired > 0)
+
+  // Rewards
   xpReward: number;
   coinReward: number;
   category: string;
   order: number;
+
   createdAt: Date;
   updatedAt: Date;
 }
@@ -24,9 +39,23 @@ const ChecklistItemSchema = new Schema<IChecklistItem>(
     title: { type: String, required: true },
     description: { type: String, default: '' },
     frequency: { type: String, default: 'once' },
+
+    // Scheduling
+    unlockAt: { type: Date, default: null },
+    cooldownMinutes: { type: Number, default: 0 },
     nextDueAt: { type: Date, default: null },
+    totalRequired: { type: Number, default: 1 },
+    completionCount: { type: Number, default: 0 },
+    durationDays: { type: Number, default: 0 },
+    expiresAt: { type: Date, default: null },
+    timeOfDay: { type: String, default: 'any' },
+
+    // Status
     isCompleted: { type: Boolean, default: false },
     completedAt: { type: Date, default: null },
+    isFullyDone: { type: Boolean, default: false },
+
+    // Rewards & ordering
     xpReward: { type: Number, default: 10 },
     coinReward: { type: Number, default: 5 },
     category: { type: String, default: 'general' },
@@ -36,4 +65,3 @@ const ChecklistItemSchema = new Schema<IChecklistItem>(
 );
 
 export const ChecklistItem = mongoose.model<IChecklistItem>('ChecklistItem', ChecklistItemSchema);
-
