@@ -2,14 +2,14 @@ import { Response } from 'express';
 import { AuthRequest } from '../middleware/auth';
 import { Consultation } from '../models/Consultation';
 import { ChecklistItem } from '../models/ChecklistItem';
-import { Map } from '../models/Map';
+import { Map as MapModel } from '../models/Map';
 import { MapThemeTemplate } from '../models/MapThemeTemplate';
 import { processVoice } from '../services/agents/voiceAgent';
 import { processImage } from '../services/agents/imageAgent';
 import { processText } from '../services/agents/textAgent';
 import { processPdf } from '../services/agents/pdfAgent';
 import { aggregateSummaries } from '../services/agents/summaryAgent';
-import { structureChecklist } from '../services/agents/checklistAgent';
+import { structureChecklistAsEvents } from '../services/agents/checklistAgent';
 import {
   generateMapSpecForChecklist,
   deriveChecklistSignals,
@@ -139,56 +139,46 @@ export const createConsultation = async (req: AuthRequest, res: Response): Promi
 
     console.log(`[Pipeline] Cleaned paragraph length: ${checklistParagraph.length} chars`);
 
-    // ── OPTIMIZATION: Run structureChecklist + detectTheme in PARALLEL ──
-    // Both only need checklistParagraph, so they can run simultaneously
-    console.log(`Running structureChecklist + detectTheme in parallel...`);
-    const [checklistData, consultationTheme] = await Promise.all([
-      structureChecklist(checklistParagraph),
-      detectThemeWithOpenAI([], rawParagraph), // rawContext with formatting is fine for theme detection
+    // ── OPTIMIZATION: Run structureChecklistAsEvents (GPT-4.1) + detectTheme in PARALLEL ──
+    console.log(`Running structureChecklistAsEvents + detectTheme in parallel...`);
+    const [eventData, consultationTheme] = await Promise.all([
+      structureChecklistAsEvents(checklistParagraph),
+      detectThemeWithOpenAI([], rawParagraph),
     ]);
-    
-    console.log(`\n=== CHECKLIST ITEMS GENERATED ===`);
-    console.log(`Generated ${checklistData.length} checklist items from GPT for consultation ${consultation._id}`);
-    console.log(`\nFull checklist items JSON that will be saved to DB:`);
-    console.log(JSON.stringify(checklistData, null, 2));
+
+    console.log(`\n=== CHECKLIST EVENTS GENERATED ===`);
+    console.log(`Generated ${eventData.length} events from GPT-4.1 for consultation ${consultation._id}`);
     console.log(`\nRaw consultation paragraph used for generation:`);
     console.log(checklistParagraph);
     console.log(`===================================\n`);
 
-    // Save checklist items to database with computed timing
+    // Save one checklist item per event (unlockAt = exact date/time; groupId, orderInGroup for star grouping)
     const now = new Date();
     const checklistItems = await ChecklistItem.insertMany(
-      checklistData.map((item, index) => {
-        const unlockAfterMs = (item.unlockAfterHours || 0) * 60 * 60 * 1000;
-        const unlockAt = unlockAfterMs > 0 ? new Date(now.getTime() + unlockAfterMs) : null;
-        const cooldownMinutes = (item.cooldownHours || 0) * 60;
-        const durationDays = item.durationDays || 0;
-        const expiresAt = durationDays > 0 ? new Date(now.getTime() + durationDays * 24 * 60 * 60 * 1000) : null;
-
-        return {
-          consultationId: consultation._id,
-          userId,
-          title: item.title,
-          description: item.description,
-          frequency: item.frequency,
-          category: item.category,
-          xpReward: item.xpReward || 10,
-          coinReward: item.coinReward || 5,
-          order: index,
-          // Timing fields
-          unlockAt,
-          cooldownMinutes,
-          nextDueAt: unlockAt, // first due = unlock time (null means available now)
-          totalRequired: item.totalRequired ?? 1,
-          completionCount: 0,
-          durationDays,
-          expiresAt,
-          timeOfDay: item.timeOfDay || 'any',
-          isFullyDone: false,
-        };
-      })
+      eventData.map((event, index) => ({
+        consultationId: consultation._id,
+        userId,
+        title: event.title,
+        description: event.description,
+        frequency: 'once',
+        category: event.category,
+        xpReward: event.xpReward,
+        coinReward: event.coinReward,
+        order: index,
+        unlockAt: new Date(event.unlockAt),
+        cooldownMinutes: 0,
+        nextDueAt: new Date(event.unlockAt),
+        totalRequired: 1,
+        completionCount: 0,
+        durationDays: 0,
+        expiresAt: null,
+        timeOfDay: 'any',
+        isFullyDone: false,
+        groupId: event.groupId,
+        orderInGroup: event.orderInGroup,
+      }))
     );
-    console.log(`Saved ${checklistItems.length} checklist items to database for consultation ${consultation._id}`);
+    console.log(`Saved ${checklistItems.length} checklist items (events) to database for consultation ${consultation._id}`);
 
     // Save consultation (with summaries) before map generation
     await consultation.save();
@@ -198,19 +188,27 @@ export const createConsultation = async (req: AuthRequest, res: Response): Promi
       console.warn('[RAG] Failed to index consultation context:', err)
     );
 
-    // Build items data for map generation and theme detection
-    const checklistItemsData = checklistItems.map((item) => ({
-      category: item.category,
-      title: item.title,
-      description: item.description,
-    }));
-    
+    // Build group-level data for map: one star per unique groupId (first event in group = label)
+    const groupOrder: string[] = [];
+    const groupToFirstItem = new Map<string, { category: string; title: string; description: string }>();
+    for (const item of checklistItems) {
+      const g = String(item.groupId);
+      if (!groupToFirstItem.has(g)) {
+        groupOrder.push(g);
+        groupToFirstItem.set(g, {
+          category: item.category,
+          title: item.title,
+          description: item.description,
+        });
+      }
+    }
+    const checklistItemsData = groupOrder.map((g) => groupToFirstItem.get(g)!);
+
     console.log(`\n=== THEME DETECTION ===`);
     console.log(`Raw consultation context for theme detection:`);
     console.log(checklistParagraph);
-    console.log(`\nChecklist items data for theme detection:`);
+    console.log(`\nGroup-level data for map (${checklistItemsData.length} stars):`);
     console.log(JSON.stringify(checklistItemsData, null, 2));
-    
     console.log(`\nDetected theme:`);
     console.log(JSON.stringify(consultationTheme, null, 2));
     console.log(`Theme Key: ${consultationTheme.themeKey}`);
@@ -219,11 +217,11 @@ export const createConsultation = async (req: AuthRequest, res: Response): Promi
     console.log(`Specific Elements: ${consultationTheme.specificElements.join(', ')}`);
     console.log(`========================\n`);
 
-    // Generate a SINGLE tall vertical scrollable map with ALL checkpoints
+    // Generate a SINGLE tall vertical scrollable map: one checkpoint (star) per group
     const allItems = checklistItemsData;
     const signals = deriveChecklistSignals(allItems);
     const themeProfile = consultationTheme || analyzeChecklistTheme(allItems);
-    const totalStepCount = allItems.length;
+    const totalStepCount = allItems.length; // number of stars (groups)
 
     // Check for existing template (reuse if available)
     const existingTemplate = await MapThemeTemplate.findOne({
@@ -315,7 +313,7 @@ export const createConsultation = async (req: AuthRequest, res: Response): Promi
     }
 
     // Save single scrollable map to database
-    const savedMap = await Map.create({
+    const savedMap = await MapModel.create({
       consultationId: consultation._id,
       userId,
       mapIndex: 0, // Only one map now
@@ -375,7 +373,7 @@ export const deleteConsultation = async (req: AuthRequest, res: Response): Promi
     // Delete all associated data in parallel
     await Promise.all([
       ChecklistItem.deleteMany({ consultationId }),
-      Map.deleteMany({ consultationId }),
+      MapModel.deleteMany({ consultationId }),
       Consultation.deleteOne({ _id: consultationId }),
     ]);
 

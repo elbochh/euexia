@@ -36,6 +36,8 @@ interface ChecklistItem {
   coinReward: number;
   category: string;
   order: number;
+  groupId?: string;
+  orderInGroup?: number;
   // Timing fields (computed by backend)
   unlockAt: string | null;
   cooldownMinutes: number;

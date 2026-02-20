@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
+import crypto from 'crypto';
 import { User } from '../models/User';
 import { GameProgress } from '../models/GameProgress';
 import { AuthRequest } from '../middleware/auth';
@@ -70,6 +71,29 @@ export const login = async (req: Request, res: Response): Promise<void> => {
   } catch (error) {
     console.error('Login error:', error);
     res.status(500).json({ error: 'Failed to login' });
+  }
+};
+
+/** Create a guest user (same schema as normal user, identified by email prefix + name "Guest") */
+export const continueAsGuest = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const guestId = crypto.randomBytes(8).toString('hex');
+    const email = `guest_${guestId}@euexia.guest`;
+    const passwordHash = await bcrypt.hash(crypto.randomBytes(32).toString('hex'), 12);
+    const name = 'Guest';
+
+    const user = await User.create({ email, passwordHash, name });
+    await GameProgress.create({ userId: user._id });
+
+    const token = jwt.sign({ userId: user._id }, JWT_SECRET, { expiresIn: '7d' });
+
+    res.status(201).json({
+      token,
+      user: { id: user._id, email: user.email, name: user.name },
+    });
+  } catch (error) {
+    console.error('Guest auth error:', error);
+    res.status(500).json({ error: 'Failed to continue as guest' });
   }
 };
 

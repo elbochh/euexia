@@ -96,6 +96,45 @@ export async function invokeTextModel(
 }
 
 /**
+ * Invoke OpenAI only for checklist structuring (GPT-4.1). Used so checklist
+ * events always come from GPT-4.1 regardless of AI_TEXT_PROVIDER.
+ */
+export async function invokeOpenAIForChecklist(prompt: string): Promise<SageMakerResponse> {
+  const apiKey = process.env.OPENAI_API_KEY;
+  const model = process.env.OPENAI_CHECKLIST_MODEL || process.env.OPENAI_TEXT_MODEL || 'gpt-4.1-mini';
+  if (!apiKey) {
+    throw new Error('OPENAI_API_KEY is required for checklist structuring (GPT-4.1)');
+  }
+
+  const response = await fetch('https://api.openai.com/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      model,
+      temperature: 0.2,
+      messages: [
+        {
+          role: 'system',
+          content: 'You are a precise medical assistant. Return only valid JSON arrays with no extra text.',
+        },
+        { role: 'user', content: prompt },
+      ],
+    }),
+  });
+
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(`OpenAI checklist call failed: ${response.status} ${body}`);
+  }
+
+  const result: any = await response.json();
+  return { text: result?.choices?.[0]?.message?.content || '', raw: result };
+}
+
+/**
  * Invoke MedGemma multimodal model for image + text analysis (chest X-rays, medical images)
  */
 export async function invokeImageModel(

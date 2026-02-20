@@ -1,4 +1,4 @@
-import { invokeTextModel } from '../sagemaker';
+import { invokeTextModel, invokeOpenAIForChecklist } from '../sagemaker';
 
 export interface ChecklistItemData {
   title: string;
@@ -13,6 +13,18 @@ export interface ChecklistItemData {
   totalRequired: number;      // total completions needed (1 = one-time, 0 = ongoing/indefinite)
   durationDays: number;       // how many days this task is relevant (0 = indefinite)
   timeOfDay: string;          // preferred time: "morning", "afternoon", "evening", "night", "any"
+}
+
+/** Event-based checklist: one row per occurrence (e.g. 7 events for "daily for 7 days") */
+export interface ChecklistEventData {
+  title: string;
+  description: string;
+  category: string;
+  xpReward: number;
+  coinReward: number;
+  unlockAt: string;     // ISO date-time, e.g. "2025-02-20T00:00:00.000Z" for day 1 00:00, 19:00 for night
+  groupId: string;     // same groupId = same star on map
+  orderInGroup: number; // 0, 1, 2, ... event N unlocks when previous in group is completed
 }
 
 /* ------------------------------------------------------------------ */
@@ -358,6 +370,137 @@ function ruleBasedFallback(paragraph: string): ChecklistItemData[] {
   });
 
   return deduped.length > 0 ? deduped : [];
+}
+
+/* ------------------------------------------------------------------ */
+/*  Event-based structuring (GPT-4.1 only)                            */
+/* ------------------------------------------------------------------ */
+
+function buildEventsPrompt(paragraph: string, nowIso: string): string {
+  return `You are a clinical AI assistant. Convert the care plan into a JSON array of EVENTS.
+Each event = one actionable occurrence the patient can mark complete. Use "now" as the consultation time.
+
+RULES:
+1. One event per occurrence. "Take medicine X daily for 7 days" = 7 events (same title, groupId, orderInGroup 0..6).
+2. Events that can be done the same day without order = same groupId, same or different orderInGroup.
+3. unlockAt = exact date-time in ISO 8601 (e.g. "2025-02-20T00:00:00.000Z"). Day 1 = first day from now, Day 2 = next day, etc.
+4. Time of day: "morning" → 08:00, "afternoon" → 14:00, "evening" → 18:00, "night" → 19:00. Default 00:00 if not specified.
+5. groupId: string to group events under the same star (e.g. "med1" for medicine 1, "day1" for day-1 tasks). Same day, same star = same groupId.
+6. orderInGroup: 0, 1, 2, ... For sequential unlock (e.g. daily medicine): event N unlocks only when event N-1 is completed.
+7. title: SHORT (e.g. "Take Amoxicillin", "Check blood pressure"). description: practical advice with dose/timing.
+8. Return ONLY a valid JSON array — no markdown, no explanation.
+
+Reference "now" for relative dates: ${nowIso}
+
+JSON schema per event:
+{
+  "title": "string (short, max 30 chars)",
+  "description": "string (practical advice)",
+  "category": "medication|nutrition|exercise|monitoring|appointment|test|lifestyle|general",
+  "xpReward": 5-30,
+  "coinReward": 3-15,
+  "unlockAt": "ISO 8601 date-time string",
+  "groupId": "string (same = same star)",
+  "orderInGroup": 0-based index within group
+}
+
+Example (daily medicine for 3 days, morning):
+[
+  {"title":"Take Amoxicillin","description":"Take 500mg with breakfast.","category":"medication","xpReward":25,"coinReward":12,"unlockAt":"2025-02-20T08:00:00.000Z","groupId":"amox","orderInGroup":0},
+  {"title":"Take Amoxicillin","description":"Take 500mg with breakfast.","category":"medication","xpReward":25,"coinReward":12,"unlockAt":"2025-02-21T08:00:00.000Z","groupId":"amox","orderInGroup":1},
+  {"title":"Take Amoxicillin","description":"Take 500mg with breakfast.","category":"medication","xpReward":25,"coinReward":12,"unlockAt":"2025-02-22T08:00:00.000Z","groupId":"amox","orderInGroup":2}
+]
+
+Care plan:
+${paragraph}
+
+JSON array:`;
+}
+
+function validateAndNormalizeEvents(raw: any[], now: Date): ChecklistEventData[] {
+  const validCategories = ['medication', 'nutrition', 'exercise', 'monitoring', 'appointment', 'test', 'lifestyle', 'general'];
+  return raw
+    .filter((item: any) => item && typeof item === 'object' && item.title)
+    .map((item: any, index: number) => {
+      let unlockAt = item.unlockAt;
+      if (typeof unlockAt !== 'string' || isNaN(Date.parse(unlockAt))) {
+        // Default: day 0 at 00:00
+        const d = new Date(now);
+        d.setHours(0, 0, 0, 0);
+        unlockAt = d.toISOString();
+      }
+      const groupId = String(item.groupId ?? `g${index}`);
+      const orderInGroup = typeof item.orderInGroup === 'number' ? Math.max(0, item.orderInGroup) : 0;
+      return {
+        title: cleanTitle(String(item.title)),
+        description: String(item.description ?? ''),
+        category: validCategories.includes(item.category) ? item.category : 'general',
+        xpReward: typeof item.xpReward === 'number' ? Math.min(30, Math.max(5, item.xpReward)) : 10,
+        coinReward: typeof item.coinReward === 'number' ? Math.min(15, Math.max(3, item.coinReward)) : 5,
+        unlockAt,
+        groupId,
+        orderInGroup,
+      };
+    });
+}
+
+/**
+ * Structure care plan as events (GPT-4.1 only). One DB row per event; map has one star per groupId.
+ */
+export async function structureChecklistAsEvents(paragraph: string): Promise<ChecklistEventData[]> {
+  const now = new Date();
+  const nowIso = now.toISOString();
+  const prompt = buildEventsPrompt(paragraph, nowIso);
+
+  try {
+    const result = await invokeOpenAIForChecklist(prompt);
+    const parsed = extractJsonArray(result.text);
+    const events = validateAndNormalizeEvents(parsed, now);
+    if (events.length > 0) {
+      console.log(`[Checklist] structureChecklistAsEvents: ${events.length} events from GPT-4.1`);
+      return events;
+    }
+  } catch (err: any) {
+    console.warn('[Checklist] structureChecklistAsEvents failed:', err.message);
+  }
+
+  // Fallback: use legacy structureChecklist and expand to one event per item
+  const legacy = await structureChecklist(paragraph);
+  const fallback: ChecklistEventData[] = [];
+  for (let i = 0; i < legacy.length; i++) {
+    const item = legacy[i];
+    const d = new Date(now);
+    d.setHours(0, 0, 0, 0);
+    if (item.timeOfDay === 'morning') d.setHours(8, 0, 0, 0);
+    else if (item.timeOfDay === 'afternoon') d.setHours(14, 0, 0, 0);
+    else if (item.timeOfDay === 'evening') d.setHours(18, 0, 0, 0);
+    else if (item.timeOfDay === 'night') d.setHours(19, 0, 0, 0);
+    const count = item.totalRequired > 0 ? item.totalRequired : 1;
+    for (let j = 0; j < count; j++) {
+      const unlock = new Date(d.getTime() + j * 24 * 60 * 60 * 1000);
+      fallback.push({
+        title: item.title,
+        description: item.description,
+        category: item.category,
+        xpReward: item.xpReward,
+        coinReward: item.coinReward,
+        unlockAt: unlock.toISOString(),
+        groupId: `g${i}`,
+        orderInGroup: j,
+      });
+    }
+  }
+  console.log(`[Checklist] structureChecklistAsEvents fallback: ${fallback.length} events`);
+  return fallback.length > 0 ? fallback : [{
+    title: 'Follow care plan',
+    description: paragraph.substring(0, 500),
+    category: 'general',
+    xpReward: 10,
+    coinReward: 5,
+    unlockAt: now.toISOString(),
+    groupId: 'g0',
+    orderInGroup: 0,
+  }];
 }
 
 /* ------------------------------------------------------------------ */

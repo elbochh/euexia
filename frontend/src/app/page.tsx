@@ -51,6 +51,20 @@ export default function HomePage() {
     }
   };
 
+  const handleContinueAsGuest = async () => {
+    setError('');
+    setLoading(true);
+    try {
+      const res = await authApi.guest();
+      setUser(res.data.user, res.data.token);
+      router.push('/dashboard');
+    } catch (err: any) {
+      setError(err.response?.data?.error || 'Something went wrong');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
     <div className="min-h-screen flex flex-col items-center justify-center px-4 relative overflow-hidden">
       {/* Animated background elements */}
@@ -197,6 +211,16 @@ export default function HomePage() {
             ) : (
               'Start Your Journey'
             )}
+          </button>
+
+          <button
+            type="button"
+            onClick={handleContinueAsGuest}
+            disabled={loading}
+            className="w-full mt-3 py-2.5 rounded-xl text-sm font-medium text-gray-400 hover:text-white
+              border border-gray-600/50 hover:border-gray-500/50 transition-colors disabled:opacity-50"
+          >
+            Continue as guest
           </button>
         </form>
 

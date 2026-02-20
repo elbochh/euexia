@@ -15,7 +15,7 @@ import {
 } from 'pixi.js';
 import { getTheme, GameTheme } from './themes';
 import type { PersonalizedMapSpec } from '@/stores/gameStore';
-import { getOrRenderSpriteSheet } from '@/lib/fbxToSpriteRenderer';
+import { getOrRenderKenneySpriteSheet } from '@/lib/kenneyModelSpriteRenderer';
 
 interface ChecklistItem {
   _id: string;
@@ -23,6 +23,8 @@ interface ChecklistItem {
   description: string;
   frequency: string;
   isCompleted: boolean;
+  isLocked?: boolean;
+  isAvailable?: boolean;
   xpReward: number;
   coinReward: number;
   category: string;
@@ -36,6 +38,8 @@ interface GameCanvasProps {
   mapSpec?: PersonalizedMapSpec | null;
   mapImageUrl?: string | null;
   checklistItems?: ChecklistItem[];
+  /** Events per star (one star can have multiple events); length = number of nodes */
+  eventsPerStar?: ChecklistItem[][];
   onCheckpointClick?: (index: number) => void;
 }
 
@@ -46,6 +50,7 @@ export default function GameCanvas({
   mapSpec,
   mapImageUrl,
   checklistItems = [],
+  eventsPerStar,
   onCheckpointClick,
 }: GameCanvasProps) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -149,39 +154,48 @@ export default function GameCanvas({
     g.fill(color);
   };
 
+  /** Render actual Kenney GLB models into lightweight sprite sheets (cached). */
   const loadAnimationFrames = useCallback(
-    async (characterId: 'player' | 'doctor', animation: 'walk' | 'idle') => {
+    async (characterId: 'player' | 'doctor', animation: 'walk' | 'idle'): Promise<Texture[] | null> => {
       try {
-        const renderedSpriteUrl = await getOrRenderSpriteSheet(characterId, animation);
-        if (renderedSpriteUrl) {
-          // Load the rendered sprite sheet
-          const spriteTexture = await Assets.load(renderedSpriteUrl) as Texture;
-          
-          // Extract frames from sprite sheet (8 frames horizontally)
-          const frameWidth = spriteTexture.width / 8;
-          const frameHeight = spriteTexture.height;
-          const frames: Texture[] = [];
-          
-          for (let i = 0; i < 8; i += 1) {
-            // Create a new texture from a region of the sprite sheet
-            const frameRect = new Rectangle(i * frameWidth, 0, frameWidth, frameHeight);
-            const frame = new Texture({
+        const spriteUrl = await getOrRenderKenneySpriteSheet(characterId, animation);
+        if (!spriteUrl) return null;
+        const spriteTexture = (await Assets.load(spriteUrl)) as Texture;
+        const frameCount = 12;
+        const frameWidth = spriteTexture.width / frameCount;
+        const frameHeight = spriteTexture.height;
+        const frames: Texture[] = [];
+        for (let i = 0; i < frameCount; i += 1) {
+          frames.push(
+            new Texture({
               source: spriteTexture.source,
-              frame: frameRect,
-            });
-            frames.push(frame);
-          }
-          
-          if (frames.length > 0) {
-            console.log(`✅ Using auto-rendered sprite sheet for ${characterId}/${animation}`);
-            return frames;
-          }
+              frame: new Rectangle(i * frameWidth, 0, frameWidth, frameHeight),
+            })
+          );
         }
+        return frames.length > 0 ? frames : null;
       } catch (error) {
-        console.error(`Failed to load FBX-based frames for ${characterId}/${animation}:`, error);
+        console.warn(`Failed to load Kenney model animation for ${characterId}/${animation}:`, error);
+        return null;
       }
+    },
+    []
+  );
 
-      return null;
+  const loadKenneyCharacterFrames = useCallback(
+    async (characterId: 'player' | 'doctor'): Promise<Texture[] | null> => {
+      const assetPath =
+        characterId === 'doctor'
+          ? '/kenney_blocky-characters_20/Previews/character-i.png'
+          : '/kenney_blocky-characters_20/Previews/character-a.png';
+      try {
+        const texture = (await Assets.load(assetPath)) as Texture;
+        if (!texture?.source) return null;
+        return [texture];
+      } catch (error) {
+        console.warn(`Failed to load Kenney ${characterId} sprite (${assetPath}):`, error);
+        return null;
+      }
     },
     []
   );
@@ -205,6 +219,10 @@ export default function GameCanvas({
       while (app.stage.children.length > 0) {
         app.stage.removeChildAt(0);
       }
+      // Reset scroll state each render to avoid stale refs after mode switches.
+      scrollContainerRef.current = null;
+      scrollYRef.current = 0;
+      maxScrollYRef.current = 0;
 
       const accentColor = dynamicSpec?.palette?.accent
         ? hexToNumber(dynamicSpec.palette.accent, themeData.checkpointGlow)
@@ -229,53 +247,35 @@ export default function GameCanvas({
           const texture = await Assets.load(fullImageUrl);
           if (!isRenderActive()) return;
           
-          // Check if this is a scrollable map (tall vertical image)
-          const isScrollableMap = texture.height > texture.width * 1.2; // Portrait/tall image
-          
-          if (isScrollableMap) {
-            // Create scrollable container
-            const scrollContainer = new Container();
-            scrollContainerRef.current = scrollContainer;
-            
-            // Scale map to fit width, maintain aspect ratio
-            const scale = width / texture.width;
-            const mapSprite = new Sprite(texture);
-            mapSprite.scale.set(scale);
-            const mapHeight = texture.height * scale;
-            
-            // Position map at top of scroll container (y=0)
-            mapSprite.x = 0;
-            mapSprite.y = 0;
-            
-            scrollContainer.addChild(mapSprite);
-            
-            // Allow scrolling the full map height (more stretched)
-            // This ensures we can scroll from bottom (checkpoint 1) to top (last checkpoint)
-            maxScrollYRef.current = Math.max(0, mapHeight - height);
-            
-            // Start at bottom (checkpoint 1 visible) - scroll to show bottom of map
-            scrollYRef.current = maxScrollYRef.current;
-            scrollContainer.y = -scrollYRef.current;
-            
-            // Add mask to show only viewport (on stage, not scroll container)
-            const mask = new Graphics();
-            mask.rect(0, 0, width, height);
-            mask.fill(0xffffff);
-            app.stage.addChild(mask);
-            scrollContainer.mask = mask;
-            
-            app.stage.addChild(scrollContainer);
-            hasImageBackground = true;
-          } else {
-            // Regular map - scale to cover canvas
-            const mapSprite = new Sprite(texture);
-            const scale = Math.max(width / texture.width, height / texture.height);
-            mapSprite.scale.set(scale);
-            mapSprite.x = (width - texture.width * scale) / 2;
-            mapSprite.y = (height - texture.height * scale) / 2;
-            app.stage.addChild(mapSprite);
-            hasImageBackground = true;
-          }
+          // Map is always scrollable at "3 phone heights": only 1/3 of the content visible at a time, zoomed on the middle (path).
+          const scrollableMapHeights = 3;
+          const mapHeight = height * scrollableMapHeights; // total scrollable height = 3 viewport heights
+          const scale = mapHeight / texture.height;
+          const mapWidth = texture.width * scale;
+
+          const scrollContainer = new Container();
+          scrollContainerRef.current = scrollContainer;
+
+          const mapSprite = new Sprite(texture);
+          mapSprite.scale.set(scale);
+          mapSprite.x = (width - mapWidth) / 2; // center horizontally so path (middle) is in view
+          mapSprite.y = 0;
+
+          scrollContainer.addChild(mapSprite);
+
+          maxScrollYRef.current = Math.max(0, mapHeight - height);
+          // Start scrolled to show the middle third (path is visually in the middle)
+          scrollYRef.current = Math.max(0, Math.min(maxScrollYRef.current, mapHeight / 2 - height / 2));
+          scrollContainer.y = -scrollYRef.current;
+
+          const mask = new Graphics();
+          mask.rect(0, 0, width, height);
+          mask.fill(0xffffff);
+          app.stage.addChild(mask);
+          scrollContainer.mask = mask;
+
+          app.stage.addChild(scrollContainer);
+          hasImageBackground = true;
         } catch (error) {
           console.error('Failed to load map image:', error);
           // Fall through to draw default background
@@ -488,30 +488,41 @@ export default function GameCanvas({
         console.warn('Failed to load star_icon.png, using fallback rendering:', error);
       }
 
+      const starRadius = 40;
+      const marginPx = 14;
+
       nodePoints.forEach((point, index) => {
         let cx: number, cy: number;
-        
+        let mapWidthForClamp: number, mapHeightForClamp: number;
+
         if (scrollContainerRef.current) {
-          // For scrollable maps: coordinates are relative to map image
           const mapImage = scrollContainerRef.current.children.find((child: any) => child instanceof Sprite) as Sprite | undefined;
           if (mapImage) {
-            const mapWidth = mapImage.width;
-            const mapHeight = mapImage.height;
-            // y=1.0 is bottom of map, y=0.0 is top of map
-            cx = point.x * mapWidth;
-            cy = point.y * mapHeight; // y=1.0 → bottom, y=0.0 → top
+            mapWidthForClamp = mapImage.width;
+            mapHeightForClamp = mapImage.height;
+            cx = point.x * mapWidthForClamp;
+            cy = point.y * mapHeightForClamp;
           } else {
+            mapWidthForClamp = width;
+            mapHeightForClamp = height;
             cx = point.x * width;
             cy = point.y * height;
           }
         } else {
-          // Regular map: coordinates relative to viewport
+          mapWidthForClamp = width;
+          mapHeightForClamp = height;
           cx = point.x * width;
           cy = point.y * height;
         }
+        cx = Math.max(starRadius + marginPx, Math.min(mapWidthForClamp - starRadius - marginPx, cx));
+        cy = Math.max(starRadius + marginPx, Math.min(mapHeightForClamp - starRadius - marginPx, cy));
+
+        const eventsAtStar = eventsPerStar?.[index] ?? (checklistItems[index] ? [checklistItems[index]] : []);
+        const isStarCompleted = eventsAtStar.some((e: ChecklistItem) => e.isCompleted);
+        const isStarLocked = eventsAtStar.length > 0 && !isStarCompleted && eventsAtStar.every((e: ChecklistItem) => e.isLocked);
         const isCompleted = index < completed;
         const isCurrent = index === completed;
-        const isLocked = index > completed;
+        const isLocked = isStarLocked || (eventsAtStar.length === 0 && index > completed);
 
         const checkpoint = new Container();
         checkpoint.position.set(cx, cy);
@@ -582,9 +593,10 @@ export default function GameCanvas({
           checkpoint.addChild(checkpointGraphics);
         }
 
-        // Checkpoint title (Clash of Clans style)
-        const checkpointItem = checklistItems[index];
-        if (checkpointItem && checkpointItem.title) {
+        // Checkpoint title: only show when at least one event at this star is completed
+        const completedEvent = eventsAtStar.find((e: ChecklistItem) => e.isCompleted);
+        const titleToShow = completedEvent?.title ?? (eventsAtStar.length === 1 ? eventsAtStar[0]?.title : null);
+        if (titleToShow) {
           const titleStyle = new TextStyle({
             fontSize: 11,
             fill: isCompleted ? '#86efac' : isCurrent ? '#ffffff' : '#9ca3af',
@@ -595,23 +607,13 @@ export default function GameCanvas({
           (titleStyle as any).dropShadowColor = 0x000000;
           (titleStyle as any).dropShadowBlur = 2;
           (titleStyle as any).dropShadowDistance = 1;
-          
-          // Truncate long titles
-          let titleText = checkpointItem.title;
-          if (titleText.length > 20) {
-            titleText = titleText.substring(0, 17) + '...';
-          }
-          
-          const title = new Text({
-            text: titleText,
-            style: titleStyle,
-          });
+          let titleText = titleToShow;
+          if (titleText.length > 20) titleText = titleText.substring(0, 17) + '...';
+          const title = new Text({ text: titleText, style: titleStyle });
           title.anchor.set(0.5);
           title.position.set(0, iconSize + 16);
           checkpoint.addChild(title);
         }
-
-        // No stars - cleaner design like Clash of Clans
 
         pathContainer.addChild(checkpoint);
         
@@ -624,6 +626,13 @@ export default function GameCanvas({
 
       // Add path and checkpoints to scroll container if scrollable, otherwise to stage
       if (scrollContainerRef.current) {
+        const mapSprite = scrollContainerRef.current.getChildAt(0) as Sprite;
+        if (mapSprite) {
+          pathContainer.x = mapSprite.x;
+          pathContainer.y = 0;
+          decorFront.x = mapSprite.x;
+          decorFront.y = 0;
+        }
         scrollContainerRef.current.addChild(pathContainer);
         scrollContainerRef.current.addChild(decorFront);
       } else {
@@ -634,166 +643,186 @@ export default function GameCanvas({
       // Player character - detailed animated character
       const player = new Container();
       const characterTargetHeight = 84;
-      // Scale up the entire player character (1.5x bigger)
-      const playerScale = 1.5;
+      // Scale up for Clash-of-Clans style presence (2x)
+      const playerScale = 2;
       player.scale.set(playerScale);
       let playerSprite: AnimatedSprite | null = null;
       // Use conservative viewport bounds independent of texture frame quirks.
       const playerSafeWidth = 108;
       const playerSafeHeight = 172;
 
-      // Shadow with blur effect
+      const sw = 2.5; // Thick black outline - Clash of Clans style
+      const outline = { color: 0x000000, width: sw };
+
+      // Shadow
       const playerShadow = new Graphics();
-      playerShadow.ellipse(0, 0, 10, 5);
-      playerShadow.fill({ color: 0x000000, alpha: 0.2 });
+      playerShadow.ellipse(0, 0, 12, 6);
+      playerShadow.fill({ color: 0x000000, alpha: 0.25 });
       playerShadow.position.set(0, 0);
       player.addChild(playerShadow);
 
-      // Legs
+      // Legs (chibi) - redraw path before stroke so outline renders (Pixi v8)
       const leftLeg = new Graphics();
-      leftLeg.roundRect(-6, 8, 5, 12, 2);
+      leftLeg.roundRect(-7, 10, 6, 11, 3);
       leftLeg.fill(0x2563eb);
-      leftLeg.roundRect(-5.5, 8, 4, 3, 1.5);
-      leftLeg.fill({ color: 0x1e40af, alpha: 0.6 });
+      leftLeg.roundRect(-7, 10, 6, 11, 3);
+      leftLeg.stroke(outline);
+      leftLeg.roundRect(-6, 11, 4, 3, 1.5);
+      leftLeg.fill({ color: 0x1e40af, alpha: 0.7 });
       player.addChild(leftLeg);
 
       const rightLeg = new Graphics();
-      rightLeg.roundRect(1, 8, 5, 12, 2);
+      rightLeg.roundRect(1, 10, 6, 11, 3);
       rightLeg.fill(0x2563eb);
-      rightLeg.roundRect(1.5, 8, 4, 3, 1.5);
-      rightLeg.fill({ color: 0x1e40af, alpha: 0.6 });
+      rightLeg.roundRect(1, 10, 6, 11, 3);
+      rightLeg.stroke(outline);
+      rightLeg.roundRect(2, 11, 4, 3, 1.5);
+      rightLeg.fill({ color: 0x1e40af, alpha: 0.7 });
       player.addChild(rightLeg);
 
-      // Feet
       const leftFoot = new Graphics();
-      leftFoot.roundRect(-7, 19, 6, 3, 1);
+      leftFoot.roundRect(-8, 20, 7, 3, 1);
       leftFoot.fill(0x1e293b);
+      leftFoot.roundRect(-8, 20, 7, 3, 1);
+      leftFoot.stroke(outline);
       player.addChild(leftFoot);
 
       const rightFoot = new Graphics();
-      rightFoot.roundRect(1, 19, 6, 3, 1);
+      rightFoot.roundRect(1, 20, 7, 3, 1);
       rightFoot.fill(0x1e293b);
+      rightFoot.roundRect(1, 20, 7, 3, 1);
+      rightFoot.stroke(outline);
       player.addChild(rightFoot);
 
-      // Torso/body with shirt
+      // Torso - blue shirt
       const torso = new Graphics();
-      torso.roundRect(-9, -4, 18, 20, 8);
+      torso.roundRect(-10, -6, 20, 18, 8);
       torso.fill(0x3b82f6);
-      // Shirt detail
-      torso.roundRect(-7, -2, 14, 6, 3);
-      torso.fill({ color: 0x2563eb, alpha: 0.8 });
-      // Belt
-      torso.roundRect(-8, 8, 16, 3, 1);
+      torso.roundRect(-10, -6, 20, 18, 8);
+      torso.stroke(outline);
+      torso.roundRect(-8, -4, 16, 6, 3);
+      torso.fill({ color: 0x2563eb, alpha: 0.85 });
+      torso.roundRect(-9, 8, 18, 3, 1);
       torso.fill(0x1e293b);
+      torso.roundRect(-9, 8, 18, 3, 1);
+      torso.stroke(outline);
       player.addChild(torso);
 
       // Arms
       const leftArm = new Graphics();
-      leftArm.roundRect(-12, 0, 5, 14, 3);
+      leftArm.roundRect(-13, -2, 6, 14, 3);
       leftArm.fill(0xfec89a);
-      leftArm.roundRect(-11.5, 0, 4, 4, 2);
-      leftArm.fill({ color: 0xfdb68a, alpha: 0.7 });
+      leftArm.roundRect(-13, -2, 6, 14, 3);
+      leftArm.stroke(outline);
       player.addChild(leftArm);
 
       const rightArm = new Graphics();
-      rightArm.roundRect(7, 0, 5, 14, 3);
+      rightArm.roundRect(7, -2, 6, 14, 3);
       rightArm.fill(0xfec89a);
-      rightArm.roundRect(7.5, 0, 4, 4, 2);
-      rightArm.fill({ color: 0xfdb68a, alpha: 0.7 });
+      rightArm.roundRect(7, -2, 6, 14, 3);
+      rightArm.stroke(outline);
       player.addChild(rightArm);
 
-      // Hands
-      const leftHand = new Graphics();
-      leftHand.circle(-9.5, 13, 3.5);
-      leftHand.fill(0xfec89a);
-      player.addChild(leftHand);
-
-      const rightHand = new Graphics();
-      rightHand.circle(9.5, 13, 3.5);
-      rightHand.fill(0xfec89a);
-      player.addChild(rightHand);
-
-      // Head
+      // Head - chibi with subtle highlight (2D-that-looks-3D)
       const head = new Graphics();
-      head.circle(0, -18, 10);
+      head.circle(0, -22, 13);
       head.fill(0xfec89a);
-      // Face shading
-      head.circle(0, -16, 8);
-      head.fill({ color: 0xfdb68a, alpha: 0.3 });
+      head.circle(0, -22, 13);
+      head.stroke(outline);
+      head.circle(0, -20, 10);
+      head.fill({ color: 0xfdb68a, alpha: 0.4 });
+      // Top-left highlight for volume
+      head.ellipse(-4, -30, 4, 3);
+      head.fill({ color: 0xffffff, alpha: 0.35 });
       player.addChild(head);
 
-      // Eyes
+      // Eyes (bold, CoC style)
       const leftEye = new Graphics();
-      leftEye.circle(-3, -19, 1.8);
+      leftEye.circle(-4, -24, 2.2);
       leftEye.fill(0x1f2937);
-      leftEye.circle(-2.8, -19.3, 0.6);
+      leftEye.circle(-4, -24, 2.2);
+      leftEye.stroke(outline);
+      leftEye.circle(-3.5, -24.4, 0.7);
       leftEye.fill(0xffffff);
       player.addChild(leftEye);
 
       const rightEye = new Graphics();
-      rightEye.circle(3, -19, 1.8);
+      rightEye.circle(4, -24, 2.2);
       rightEye.fill(0x1f2937);
-      rightEye.circle(2.8, -19.3, 0.6);
+      rightEye.circle(4, -24, 2.2);
+      rightEye.stroke(outline);
+      rightEye.circle(4.5, -24.4, 0.7);
       rightEye.fill(0xffffff);
       player.addChild(rightEye);
 
-      // Nose
-      const nose = new Graphics();
-      nose.ellipse(0, -16, 1, 1.5);
-      nose.fill({ color: 0xfdb68a, alpha: 0.5 });
-      player.addChild(nose);
-
-      // Mouth
       const mouth = new Graphics();
-      mouth.ellipse(0, -13.5, 2.5, 1.2);
-      mouth.fill({ color: 0xef4444, alpha: 0.6 });
+      mouth.ellipse(0, -17, 2.5, 1.5);
+      mouth.fill(0xe11d48);
+      mouth.ellipse(0, -17, 2.5, 1.5);
+      mouth.stroke(outline);
       player.addChild(mouth);
 
       // Hair
       const hair = new Graphics();
-      hair.ellipse(0, -24, 9, 4.5);
+      hair.ellipse(0, -30, 11, 6);
       hair.fill(0x1e293b);
-      hair.ellipse(-3, -25, 4, 3);
+      hair.ellipse(0, -30, 11, 6);
+      hair.stroke(outline);
+      hair.ellipse(-4, -31, 5, 4);
       hair.fill(0x1e293b);
-      hair.ellipse(3, -25, 4, 3);
+      hair.ellipse(-4, -31, 5, 4);
+      hair.stroke(outline);
+      hair.ellipse(4, -31, 5, 4);
       hair.fill(0x1e293b);
+      hair.ellipse(4, -31, 5, 4);
+      hair.stroke(outline);
       player.addChild(hair);
 
       // Backpack
       const backpack = new Graphics();
-      backpack.roundRect(-10, -2, 7, 12, 3);
+      backpack.roundRect(-11, -4, 8, 14, 4);
       backpack.fill(0x4f46e5);
-      backpack.roundRect(-9, -1, 5, 4, 2);
-      backpack.fill({ color: 0x6366f1, alpha: 0.8 });
-      backpack.roundRect(-8.5, 6, 4, 2, 1);
+      backpack.roundRect(-11, -4, 8, 14, 4);
+      backpack.stroke(outline);
+      backpack.roundRect(-10, -2, 6, 5, 2);
+      backpack.fill({ color: 0x6366f1, alpha: 0.9 });
+      backpack.roundRect(-9.5, 8, 5, 2.5, 1);
       backpack.fill(0x1e293b);
+      backpack.roundRect(-9.5, 8, 5, 2.5, 1);
+      backpack.stroke(outline);
       player.addChild(backpack);
 
-      // Badge/emblem on chest
+      // Badge on chest (slightly above center)
       const badge = new Graphics();
-      badge.circle(0, 2, 4);
+      badge.circle(0, -2, 5);
       badge.fill(0xffd700);
-      badge.circle(0, 2, 3);
+      badge.circle(0, -2, 5);
+      badge.stroke(outline);
+      badge.circle(0, -2, 3.5);
       badge.fill(0xffed4e);
       player.addChild(badge);
 
       const badgeIcon = new Text({
         text: dynamicSpec?.character?.skin?.includes('medic') ? '⚕' : '⭐',
         style: new TextStyle({
-          fontSize: 8,
+          fontSize: 9,
+          fill: '#1e293b',
           fontFamily: 'Arial',
+          fontWeight: 'bold',
         }),
       });
       badgeIcon.anchor.set(0.5);
-      badgeIcon.position.set(0, 2);
+      badgeIcon.position.set(0, -2);
       player.addChild(badgeIcon);
 
-      // Load player animations and default to idle.
-      const playerIdleFrames = await loadAnimationFrames('player', 'idle');
+      // Prefer actual Kenney model-derived frames; fallback to static preview if rendering fails.
+      const playerIdleFrames = (await loadAnimationFrames('player', 'idle')) ?? (await loadKenneyCharacterFrames('player'));
       const playerWalkFrames = await loadAnimationFrames('player', 'walk');
       if (!isRenderActive()) return;
       if ((playerIdleFrames && playerIdleFrames.length > 0) || (playerWalkFrames && playerWalkFrames.length > 0)) {
         player.removeChildren();
+        // Kenney sprites are already rendered characters; no upscaled container transform.
+        player.scale.set(1);
 
         const playerShadow = new Graphics();
         playerShadow.ellipse(0, 0, 10, 5);
@@ -815,7 +844,7 @@ export default function GameCanvas({
         const targetHeight = characterTargetHeight;
         const spriteScale = targetHeight / sourceHeight;
         playerSprite.scale.set(spriteScale);
-        playerSprite.animationSpeed = idleFrames.length > 1 ? 0.1 : 0;
+        playerSprite.animationSpeed = idleFrames.length > 1 ? 0.16 : 0;
         if (idleFrames.length > 1) playerSprite.play();
         player.addChild(playerSprite);
       }
@@ -842,106 +871,170 @@ export default function GameCanvas({
       const doctorSafeWidth = 104;
       const doctorSafeHeight = 166;
 
+      const docSw = 2.5;
+      const docOutline = { color: 0x000000, width: docSw };
+
+      // Scale doctor to match player presence (2x)
+      doctor.scale.set(2);
+
       // Doctor shadow
       const doctorShadow = new Graphics();
-      doctorShadow.ellipse(0, 0, 10, 5);
-      doctorShadow.fill({ color: 0x000000, alpha: 0.2 });
+      doctorShadow.ellipse(0, 0, 12, 6);
+      doctorShadow.fill({ color: 0x000000, alpha: 0.25 });
       doctorShadow.position.set(0, 0);
       doctor.addChild(doctorShadow);
 
-      // Doctor body (white coat)
-      const doctorBody = new Graphics();
-      doctorBody.roundRect(-12, -8, 24, 28, 6);
-      doctorBody.fill(0xffffff);
-      doctorBody.roundRect(-10, -6, 20, 6, 3);
-      doctorBody.fill({ color: 0xf3f4f6, alpha: 0.8 });
-      doctor.addChild(doctorBody);
-
-      // Doctor legs
+      // Doctor legs (scrubs) - redraw path before stroke
       const doctorLeftLeg = new Graphics();
-      doctorLeftLeg.roundRect(-8, 18, 6, 10, 2);
+      doctorLeftLeg.roundRect(-9, 20, 7, 11, 3);
       doctorLeftLeg.fill(0x1e293b);
+      doctorLeftLeg.roundRect(-9, 20, 7, 11, 3);
+      doctorLeftLeg.stroke(docOutline);
       doctor.addChild(doctorLeftLeg);
 
       const doctorRightLeg = new Graphics();
-      doctorRightLeg.roundRect(2, 18, 6, 10, 2);
+      doctorRightLeg.roundRect(2, 20, 7, 11, 3);
       doctorRightLeg.fill(0x1e293b);
+      doctorRightLeg.roundRect(2, 20, 7, 11, 3);
+      doctorRightLeg.stroke(docOutline);
       doctor.addChild(doctorRightLeg);
 
-      // Doctor arms
+      // White lab coat (chibi) with visible teal scrubs at collar
+      const doctorBody = new Graphics();
+      doctorBody.roundRect(-13, -10, 26, 30, 8);
+      doctorBody.fill(0xffffff);
+      doctorBody.roundRect(-13, -10, 26, 30, 8);
+      doctorBody.stroke(docOutline);
+      doctorBody.roundRect(-11, -8, 22, 8, 4);
+      doctorBody.fill({ color: 0xf8fafc, alpha: 0.9 });
+      // Collar / scrubs visible at neck (light teal - CoC doctor ref)
+      doctorBody.roundRect(-8, -9, 16, 5, 2);
+      doctorBody.fill({ color: 0x99d6ea, alpha: 0.95 });
+      doctorBody.roundRect(-8, -9, 16, 5, 2);
+      doctorBody.stroke(docOutline);
+      doctor.addChild(doctorBody);
+
+      // Arms
       const doctorLeftArm = new Graphics();
-      doctorLeftArm.roundRect(-14, -4, 5, 16, 3);
+      doctorLeftArm.roundRect(-16, -6, 6, 18, 3);
       doctorLeftArm.fill(0xfec89a);
+      doctorLeftArm.roundRect(-16, -6, 6, 18, 3);
+      doctorLeftArm.stroke(docOutline);
       doctor.addChild(doctorLeftArm);
 
       const doctorRightArm = new Graphics();
-      doctorRightArm.roundRect(9, -4, 5, 16, 3);
+      doctorRightArm.roundRect(10, -6, 6, 18, 3);
       doctorRightArm.fill(0xfec89a);
+      doctorRightArm.roundRect(10, -6, 6, 18, 3);
+      doctorRightArm.stroke(docOutline);
       doctor.addChild(doctorRightArm);
 
-      // Doctor head (wise old man)
+      // Head (chibi) with subtle highlight for volume
       const doctorHead = new Graphics();
-      doctorHead.circle(0, -22, 11);
+      doctorHead.circle(0, -26, 14);
       doctorHead.fill(0xfdb68a);
+      doctorHead.circle(0, -26, 14);
+      doctorHead.stroke(docOutline);
+      doctorHead.circle(0, -24, 11);
+      doctorHead.fill({ color: 0xfec89a, alpha: 0.35 });
+      doctorHead.ellipse(-5, -36, 5, 3.5);
+      doctorHead.fill({ color: 0xffffff, alpha: 0.3 });
       doctor.addChild(doctorHead);
+
+      // Head mirror (speculum) - CoC doctor style, prominent
+      const headMirror = new Graphics();
+      headMirror.roundRect(-14, -44, 28, 5, 2);
+      headMirror.fill(0xcbd5e1);
+      headMirror.roundRect(-14, -44, 28, 5, 2);
+      headMirror.stroke(docOutline);
+      headMirror.circle(0, -46, 6);
+      headMirror.fill(0xf1f5f9);
+      headMirror.circle(0, -46, 6);
+      headMirror.stroke(docOutline);
+      headMirror.circle(0, -46, 2.5);
+      headMirror.fill(0xffffff);
+      // Mirror glass highlight (2D-that-looks-3D)
+      headMirror.ellipse(-1.5, -47, 1.2, 0.8);
+      headMirror.fill({ color: 0xffffff, alpha: 0.7 });
+      doctor.addChild(headMirror);
 
       // Beard
       const beard = new Graphics();
-      beard.ellipse(0, -18, 8, 6);
-      beard.fill(0xd1d5db);
-      beard.ellipse(0, -16, 7, 5);
-      beard.fill(0x9ca3af);
+      beard.ellipse(0, -18, 9, 7);
+      beard.fill(0xa8b2c1);
+      beard.ellipse(0, -18, 9, 7);
+      beard.stroke(docOutline);
+      beard.ellipse(0, -15, 8, 5);
+      beard.fill({ color: 0x9ca3af, alpha: 0.8 });
       doctor.addChild(beard);
 
-      // Mustache
       const mustache = new Graphics();
-      mustache.ellipse(-3, -20, 3, 2);
-      mustache.fill(0xd1d5db);
-      mustache.ellipse(3, -20, 3, 2);
-      mustache.fill(0xd1d5db);
+      mustache.ellipse(-4, -22, 4, 2.5);
+      mustache.fill(0xa8b2c1);
+      mustache.ellipse(-4, -22, 4, 2.5);
+      mustache.stroke(docOutline);
+      mustache.ellipse(4, -22, 4, 2.5);
+      mustache.fill(0xa8b2c1);
+      mustache.ellipse(4, -22, 4, 2.5);
+      mustache.stroke(docOutline);
       doctor.addChild(mustache);
 
-      // Glasses
+      // Glasses (thick frames)
       const leftGlass = new Graphics();
-      leftGlass.circle(-4, -22, 3.5);
-      leftGlass.stroke({ color: 0x1f2937, width: 1.5 });
+      leftGlass.circle(-5, -26, 4.5);
+      leftGlass.stroke({ color: 0x1f2937, width: 2 });
       doctor.addChild(leftGlass);
 
       const rightGlass = new Graphics();
-      rightGlass.circle(4, -22, 3.5);
-      rightGlass.stroke({ color: 0x1f2937, width: 1.5 });
+      rightGlass.circle(5, -26, 4.5);
+      rightGlass.stroke({ color: 0x1f2937, width: 2 });
       doctor.addChild(rightGlass);
 
       const glassBridge = new Graphics();
-      glassBridge.roundRect(-1.5, -22, 3, 1, 0.5);
+      glassBridge.roundRect(-2, -26, 4, 1.5, 0.5);
       glassBridge.fill(0x1f2937);
       doctor.addChild(glassBridge);
 
-      // Stethoscope
+      // Eyes
+      const docLeftEye = new Graphics();
+      docLeftEye.circle(-5, -27, 2);
+      docLeftEye.fill(0x1f2937);
+      doctor.addChild(docLeftEye);
+
+      const docRightEye = new Graphics();
+      docRightEye.circle(5, -27, 2);
+      docRightEye.fill(0x1f2937);
+      doctor.addChild(docRightEye);
+
+      // Stethoscope (silver/grey)
       const stethoscope = new Graphics();
-      stethoscope.roundRect(-2, 4, 4, 12, 2);
-      stethoscope.stroke({ color: 0x3b82f6, width: 2 });
-      stethoscope.circle(0, 16, 3);
-      stethoscope.stroke({ color: 0x3b82f6, width: 2 });
+      stethoscope.roundRect(-2.5, 2, 5, 14, 2);
+      stethoscope.stroke({ color: 0x64748b, width: 2.5 });
+      stethoscope.circle(0, 17, 4);
+      stethoscope.stroke({ color: 0x64748b, width: 2.5 });
+      stethoscope.circle(0, 17, 1.5);
+      stethoscope.fill(0x94a3b8);
       doctor.addChild(stethoscope);
 
-      // Doctor badge/name tag
+      // DR badge
       const doctorBadge = new Graphics();
-      doctorBadge.roundRect(-6, -2, 12, 4, 1);
+      doctorBadge.roundRect(-7, -4, 14, 5, 2);
       doctorBadge.fill(0x3b82f6);
+      doctorBadge.roundRect(-7, -4, 14, 5, 2);
+      doctorBadge.stroke(docOutline);
       doctor.addChild(doctorBadge);
 
       const doctorBadgeText = new Text({
         text: 'DR',
         style: new TextStyle({
-          fontSize: 7,
+          fontSize: 8,
           fill: '#ffffff',
           fontFamily: 'Arial',
           fontWeight: 'bold',
         }),
       });
       doctorBadgeText.anchor.set(0.5);
-      doctorBadgeText.position.set(0, 0);
+      doctorBadgeText.position.set(0, -2);
       doctor.addChild(doctorBadgeText);
 
       // Pulse indicator (subtle animation)
@@ -970,11 +1063,12 @@ export default function GameCanvas({
       chatHint.position.set(0, -35);
       doctor.addChild(chatHint);
 
-      // Replace procedural doctor with asset character when available.
-      const doctorFrames = await loadAnimationFrames('doctor', 'idle');
+      // Prefer actual Kenney model-derived doctor frames; fallback to static preview if needed.
+      const doctorFrames = (await loadAnimationFrames('doctor', 'idle')) ?? (await loadKenneyCharacterFrames('doctor'));
       if (!isRenderActive()) return;
       if (doctorFrames && doctorFrames.length > 0) {
         doctor.removeChildren();
+        doctor.scale.set(1);
 
         clickableGlow = new Graphics();
         clickableGlow.circle(0, 0, 40);
@@ -1000,7 +1094,7 @@ export default function GameCanvas({
         const targetHeight = characterTargetHeight;
         const spriteScale = targetHeight / sourceHeight;
         doctorSprite.scale.set(spriteScale);
-        doctorSprite.animationSpeed = doctorFrames.length > 1 ? 0.12 : 0;
+        doctorSprite.animationSpeed = doctorFrames.length > 1 ? 0.16 : 0;
         if (doctorFrames.length > 1) doctorSprite.play();
         doctor.addChild(doctorSprite);
 
@@ -1020,14 +1114,6 @@ export default function GameCanvas({
         doctorHint.position.set(0, -42);
         doctor.addChild(doctorHint);
       }
-
-      // Add doctor to a separate container so it's always on top
-      const doctorContainer = new Container();
-      doctorContainer.position.set(doctorX, doctorY);
-      doctorContainer.addChild(doctor);
-      doctorContainer.zIndex = 1000; // Ensure doctor is always visible
-      // Doctor stays on stage (fixed position, not scrollable)
-      app.stage.addChild(doctorContainer);
 
       const currentIdx = Math.max(0, Math.min(completed, nodePoints.length - 1));
       const currentNode = nodePoints[currentIdx] || nodePoints[0];
@@ -1059,11 +1145,9 @@ export default function GameCanvas({
           if (mapImage) {
             const mapWidth = mapImage.width;
             const mapHeight = mapImage.height;
-            // y=1.0 is bottom of map, y=0.0 is top of map
-            // Map is at y=0 in scroll container, so node position is:
-            cx = node.x * mapWidth;
-            cy = node.y * mapHeight; // y=1.0 → bottom, y=0.0 → top
-            // Add scroll offset to get viewport-relative position
+            // Map sprite is centered: mapImage.x offsets content; y=0 is top of map
+            cx = mapImage.x + node.x * mapWidth;
+            cy = node.y * mapHeight;
             cy += scrollContainerRef.current.y;
           } else {
             // Fallback
@@ -1098,6 +1182,20 @@ export default function GameCanvas({
       };
 
       const startPos = getPlayerFootForNode(prevNode);
+
+      // Doctor follows player: ~1 star distance to the side (in same scroll space as player)
+      const doctorContainer = new Container();
+      doctorContainer.addChild(doctor);
+      doctorContainer.zIndex = 1000;
+      const doctorOffsetX = 72;
+      const doctorOffsetY = -8;
+      if (scrollContainerRef.current) {
+        scrollContainerRef.current.addChild(doctorContainer);
+        doctorContainer.position.set(startPos.x + doctorOffsetX, startPos.y + doctorOffsetY);
+      } else {
+        app.stage.addChild(doctorContainer);
+        doctorContainer.position.set(doctorX, doctorY);
+      }
       const currentPos = getPlayerFootForNode(currentNode);
       const startX = startPos.x;
       const startY = startPos.y;
@@ -1184,12 +1282,12 @@ export default function GameCanvas({
           if (isPlayerWalkingAnim) {
             if (playerSprite.textures !== playerWalkFrames) {
               playerSprite.textures = playerWalkFrames;
-              playerSprite.animationSpeed = 0.2;
+              playerSprite.animationSpeed = 0.22;
               playerSprite.play();
             }
           } else if (playerSprite.textures !== playerIdleFrames) {
             playerSprite.textures = playerIdleFrames;
-            playerSprite.animationSpeed = playerIdleFrames.length > 1 ? 0.1 : 0;
+            playerSprite.animationSpeed = playerIdleFrames.length > 1 ? 0.16 : 0;
             if (playerIdleFrames.length > 1) playerSprite.play();
             else playerSprite.gotoAndStop(0);
           }
@@ -1213,19 +1311,19 @@ export default function GameCanvas({
         playerParts.leftArm.rotation = -walk * 0.2;
         playerParts.rightArm.rotation = walk * 0.2;
         
-        // Keep doctor grounded (no floating/bobbing).
-        const doctorMarginX = Math.max(12, doctorSafeWidth * 0.5 + 8);
-        const doctorMinY = doctorSafeHeight + 10;
-        const doctorMaxY = height - 8;
-        doctorContainer.position.x = Math.max(
-          doctorMarginX,
-          Math.min(width - doctorMarginX, doctorX)
-        );
-        doctorContainer.position.y = Math.max(
-          doctorMinY,
-          Math.min(doctorMaxY, doctorY)
-        );
-        doctor.rotation = 0;
+        // Doctor follows player (when in scroll container); otherwise fixed
+        if (scrollContainerRef.current) {
+          doctorContainer.position.x = x + doctorOffsetX;
+          doctorContainer.position.y = y + doctorOffsetY;
+          doctor.rotation = 0;
+        } else {
+          const doctorMarginX = Math.max(12, doctorSafeWidth * 0.5 + 8);
+          const doctorMinY = doctorSafeHeight + 10;
+          const doctorMaxY = height - 8;
+          doctorContainer.position.x = Math.max(doctorMarginX, Math.min(width - doctorMarginX, doctorX));
+          doctorContainer.position.y = Math.max(doctorMinY, Math.min(doctorMaxY, doctorY));
+          doctor.rotation = 0;
+        }
         
         // Pulse indicator animation
         const pulse = Math.sin(tick * 6) * 0.5 + 0.5;
@@ -1267,7 +1365,7 @@ export default function GameCanvas({
         }
       });
     },
-    [onCheckpointClick]
+    [onCheckpointClick, checklistItems, eventsPerStar]
   );
 
   useEffect(() => {

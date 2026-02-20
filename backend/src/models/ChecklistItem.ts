@@ -28,6 +28,10 @@ export interface IChecklistItem extends Document {
   category: string;
   order: number;
 
+  // Event grouping (one star can have multiple events; sequential unlock within group)
+  groupId: string;       // same groupId = same star on map
+  orderInGroup: number; // 0, 1, 2, ... for sequence within group (event N unlocks when N-1 completed)
+
   createdAt: Date;
   updatedAt: Date;
 }
@@ -60,6 +64,10 @@ const ChecklistItemSchema = new Schema<IChecklistItem>(
     coinReward: { type: Number, default: 5 },
     category: { type: String, default: 'general' },
     order: { type: Number, default: 0 },
+
+    // Event grouping
+    groupId: { type: String, default: '0' },
+    orderInGroup: { type: Number, default: 0 },
   },
   { timestamps: true }
 );

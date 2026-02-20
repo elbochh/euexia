@@ -12,7 +12,7 @@ export const getChecklistItems = async (req: AuthRequest, res: Response): Promis
     const items = await ChecklistItem.find({ userId: req.userId })
       .sort({ order: 1 })
       .lean();
-    res.json({ items: items.map(addTimingInfo) });
+    res.json({ items: items.map((item) => addTimingInfo(item, items)) });
   } catch (error) {
     res.status(500).json({ error: 'Failed to get checklist items' });
   }
@@ -33,7 +33,7 @@ export const getChecklistByConsultation = async (
     })
       .sort({ order: 1 })
       .lean();
-    res.json({ items: items.map(addTimingInfo) });
+    res.json({ items: items.map((item) => addTimingInfo(item, items)) });
   } catch (error) {
     res.status(500).json({ error: 'Failed to get checklist items' });
   }
@@ -75,6 +75,27 @@ export const completeItem = async (req: AuthRequest, res: Response): Promise<voi
         unlockAt: item.unlockAt.toISOString(),
       });
       return;
+    }
+
+    // Event grouping: event N unlocks only when previous event in same group is completed
+    const groupId = item.groupId ?? '';
+    const orderInGroup = item.orderInGroup ?? 0;
+    if (groupId && orderInGroup > 0) {
+      const prevInGroup = await ChecklistItem.findOne({
+        userId: req.userId,
+        consultationId: item.consultationId,
+        groupId,
+        orderInGroup: orderInGroup - 1,
+      }).lean();
+      if (prevInGroup && !prevInGroup.isCompleted && !prevInGroup.isFullyDone) {
+        res.status(400).json({
+          error: 'locked',
+          message: 'Complete the previous task in this sequence first.',
+          remainingSeconds: 0,
+          unlockAt: item.unlockAt?.toISOString(),
+        });
+        return;
+      }
     }
 
     // Check cooldown (for recurring items that have been completed at least once)
@@ -183,12 +204,31 @@ export const uncompleteItem = async (req: AuthRequest, res: Response): Promise<v
 
 /**
  * Add computed timing fields to a checklist item for the frontend.
+ * When allItemsInConsultation is provided, isLocked also considers previous-in-group completion.
  */
-function addTimingInfo(item: any): any {
+function addTimingInfo(item: any, allItemsInConsultation?: any[]): any {
   const now = new Date();
 
-  // Is the item locked (hasn't unlocked yet)?
-  const isLocked = item.unlockAt ? now < new Date(item.unlockAt) : false;
+  // Is the item locked by time (hasn't unlocked yet)?
+  let isLockedByTime = item.unlockAt ? now < new Date(item.unlockAt) : false;
+
+  // Event grouping: locked if previous event in same group (same consultation) is not completed
+  let isLockedByGroup = false;
+  if (allItemsInConsultation && item.groupId != null && (item.orderInGroup ?? 0) > 0) {
+    const sameConsultation = allItemsInConsultation.filter(
+      (i: any) => String(i.consultationId) === String(item.consultationId)
+    );
+    const prev = sameConsultation.find(
+      (i: any) =>
+        String(i.groupId) === String(item.groupId) &&
+        (i.orderInGroup ?? 0) === (item.orderInGroup ?? 0) - 1
+    );
+    if (prev && !prev.isCompleted && !prev.isFullyDone) {
+      isLockedByGroup = true;
+    }
+  }
+
+  const isLocked = isLockedByTime || isLockedByGroup;
 
   // Is the item on cooldown (completed recently, waiting for next availability)?
   const isOnCooldown = item.nextDueAt && item.completionCount > 0
@@ -200,7 +240,7 @@ function addTimingInfo(item: any): any {
 
   // Compute remaining seconds until available
   let remainingSeconds = 0;
-  if (isLocked && item.unlockAt) {
+  if (isLockedByTime && item.unlockAt) {
     remainingSeconds = Math.ceil((new Date(item.unlockAt).getTime() - now.getTime()) / 1000);
   } else if (isOnCooldown && item.nextDueAt) {
     remainingSeconds = Math.ceil((new Date(item.nextDueAt).getTime() - now.getTime()) / 1000);

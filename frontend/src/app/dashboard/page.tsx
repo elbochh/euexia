@@ -79,22 +79,32 @@ export default function DashboardPage() {
     }
   }, [isAuthenticated]);
 
-  // Get checklist items for current consultation
+  // Get checklist items (events) for current consultation
   const currentConsultationId = currentMapInfo?.consultationId;
   const currentChecklist = currentConsultationId
     ? checklist.filter((i) => i.consultationId === currentConsultationId)
     : checklist;
 
-  // Get items for current map only
-  const mapChecklist = currentMapInfo
-    ? currentChecklist.filter(
-        (item, idx) =>
-          idx >= currentMapInfo.startStepIndex && idx <= currentMapInfo.endStepIndex
-      )
-    : currentChecklist.slice(0, 6);
+  // Group events by star: groupOrder = unique groupIds in order of first occurrence; one star per group
+  const groupOrder: string[] = [];
+  const sortedByOrder = [...currentChecklist].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+  for (const item of sortedByOrder) {
+    const g = String(item.groupId ?? item._id ?? '');
+    if (!groupOrder.includes(g)) groupOrder.push(g);
+  }
+  // Events per star (all stars for this consultation)
+  const eventsPerStarAll: typeof currentChecklist[] = groupOrder.map((g) =>
+    currentChecklist.filter((e) => String(e.groupId ?? e._id ?? '') === g)
+  );
 
-  const completedCount = mapChecklist.filter((i) => i.isCompleted).length;
-  const totalCount = mapChecklist.length;
+  // Current map shows stars [startStepIndex, endStepIndex]
+  const startStepIndex = currentMapInfo?.startStepIndex ?? 0;
+  const endStepIndex = currentMapInfo?.endStepIndex ?? Math.max(0, eventsPerStarAll.length - 1);
+  const mapEventsPerStar = eventsPerStarAll.slice(startStepIndex, endStepIndex + 1);
+
+  const completedCount = mapEventsPerStar.filter((star) => star.some((e) => e.isCompleted)).length;
+  const totalCount = mapEventsPerStar.length;
+  const mapChecklist = mapEventsPerStar.flat();
   const currentTheme = progress?.currentTheme || 'desert';
   const themeInfo = GAME_CONFIG.themeColors[currentTheme];
 
@@ -143,10 +153,10 @@ export default function DashboardPage() {
     // Modal will close automatically after completion
   };
 
-  // Get the selected checkpoint item
-  const selectedItem = selectedCheckpoint !== null 
-    ? mapChecklist[selectedCheckpoint] || null
-    : null;
+  // Selected star's events (for overlay: list of events at this star)
+  const selectedStarEvents = selectedCheckpoint !== null
+    ? (mapEventsPerStar[selectedCheckpoint] ?? [])
+    : [];
 
   return (
     <div className="h-screen pb-20 pt-14 flex flex-col overflow-hidden">
@@ -164,10 +174,11 @@ export default function DashboardPage() {
           <GameCanvas
             theme={currentTheme}
             completedCount={completedCount}
-            totalCount={Math.max(totalCount, mapChecklist.length)}
+            totalCount={Math.max(totalCount, mapEventsPerStar.length)}
             mapSpec={mapSpec}
             mapImageUrl={mapImageUrl}
             checklistItems={mapChecklist}
+            eventsPerStar={mapEventsPerStar}
             onCheckpointClick={handleCheckpointClick}
           />
 
@@ -333,11 +344,11 @@ export default function DashboardPage() {
 
       <BottomNav />
 
-      {/* Checkpoint Bottom Overlay */}
+      {/* Checkpoint Bottom Overlay: list of events at selected star */}
       <CheckpointBottomOverlay
-        isOpen={selectedCheckpoint !== null && selectedItem !== null}
+        isOpen={selectedCheckpoint !== null && selectedStarEvents.length > 0}
         onClose={handleCloseModal}
-        item={selectedItem}
+        items={selectedStarEvents}
         checkpointNumber={(selectedCheckpoint ?? 0) + 1}
         onComplete={handleCompleteTask}
       />
