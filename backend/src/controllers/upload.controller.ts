@@ -26,6 +26,7 @@ import {
 import { indexConsultationContext } from '../services/rag/indexer';
 import fs from 'fs';
 import path from 'path';
+import pdfParse from 'pdf-parse';
 
 /**
  * Create a new consultation and process all uploads through the AI pipeline.
@@ -69,7 +70,46 @@ export const createConsultation = async (req: AuthRequest, res: Response): Promi
             summary = await processText(upload.rawText || '');
             break;
           case 'pdf':
-            summary = await processPdf(upload.rawText || '', []);
+            // Extract text from PDF if fileUrl is provided but rawText is empty
+            let pdfText = upload.rawText || '';
+            if (!pdfText && upload.fileUrl) {
+              try {
+                let pdfBuffer: Buffer;
+                
+                // Check if fileUrl is a base64 string or a file path
+                if (upload.fileUrl.startsWith('/uploads/') || upload.fileUrl.startsWith('./uploads/')) {
+                  // It's a file path - read from disk
+                  const filePath = path.join(__dirname, '../../', upload.fileUrl);
+                  if (fs.existsSync(filePath)) {
+                    pdfBuffer = fs.readFileSync(filePath);
+                    console.log(`[PDF] Reading PDF from disk: ${filePath}`);
+                  } else {
+                    throw new Error(`PDF file not found at ${filePath}`);
+                  }
+                } else {
+                  // Assume it's base64-encoded PDF (may include data URL prefix)
+                  let base64Data = upload.fileUrl;
+                  // Remove data URL prefix if present (e.g., "data:application/pdf;base64,...")
+                  if (base64Data.includes(',')) {
+                    base64Data = base64Data.split(',')[1];
+                  }
+                  pdfBuffer = Buffer.from(base64Data, 'base64');
+                  console.log(`[PDF] Decoding PDF from base64 (${base64Data.length} chars)`);
+                }
+                
+                const pdfData = await pdfParse(pdfBuffer);
+                pdfText = pdfData.text;
+                console.log(`[PDF] Extracted ${pdfText.length} characters from PDF (${pdfData.numpages} pages)`);
+              } catch (parseError: any) {
+                console.error('[PDF] Failed to parse PDF:', parseError?.message || parseError);
+                // Continue with empty text - processPdf will handle it gracefully
+                pdfText = '';
+              }
+            }
+            if (!pdfText) {
+              console.warn('[PDF] No text extracted from PDF - processPdf will receive empty string');
+            }
+            summary = await processPdf(pdfText, []); // pageImages can be added later if needed
             break;
         }
         consultation.uploads[index].summary = summary;
@@ -84,16 +124,27 @@ export const createConsultation = async (req: AuthRequest, res: Response): Promi
     const summaries = (await Promise.all(summaryPromises)).filter((s) => s.length > 0);
 
     // Aggregate all summaries into a checklist paragraph
-    const checklistParagraph = await aggregateSummaries(summaries);
+    const rawParagraph = await aggregateSummaries(summaries);
     consultation.aggregatedSummary = summaries.join('\n\n---\n\n');
-    consultation.checklistParagraph = checklistParagraph;
+    consultation.checklistParagraph = rawParagraph;
+
+    // Clean the paragraph before passing to the checklist agent:
+    // Remove markdown bold/italic, normalize bullets, collapse whitespace
+    const checklistParagraph = rawParagraph
+      .replace(/\*\*/g, '')           // remove ** bold markers
+      .replace(/\*/g, '')             // remove * italic markers
+      .replace(/^[\s]*[-•*]\s*/gm, '- ')  // normalize bullet markers
+      .replace(/\n{3,}/g, '\n\n')    // collapse excessive newlines
+      .trim();
+
+    console.log(`[Pipeline] Cleaned paragraph length: ${checklistParagraph.length} chars`);
 
     // ── OPTIMIZATION: Run structureChecklist + detectTheme in PARALLEL ──
     // Both only need checklistParagraph, so they can run simultaneously
     console.log(`Running structureChecklist + detectTheme in parallel...`);
     const [checklistData, consultationTheme] = await Promise.all([
       structureChecklist(checklistParagraph),
-      detectThemeWithOpenAI([], checklistParagraph), // rawContext is sufficient for theme detection
+      detectThemeWithOpenAI([], rawParagraph), // rawContext with formatting is fine for theme detection
     ]);
     
     console.log(`\n=== CHECKLIST ITEMS GENERATED ===`);
@@ -304,6 +355,46 @@ export const getConsultations = async (req: AuthRequest, res: Response): Promise
     res.json({ consultations });
   } catch (error) {
     res.status(500).json({ error: 'Failed to get consultations' });
+  }
+};
+
+/**
+ * Delete a consultation and all associated data
+ */
+export const deleteConsultation = async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const userId = req.userId!;
+    const { consultationId } = req.params;
+
+    const consultation = await Consultation.findOne({ _id: consultationId, userId });
+    if (!consultation) {
+      res.status(404).json({ error: 'Consultation not found' });
+      return;
+    }
+
+    // Delete all associated data in parallel
+    await Promise.all([
+      ChecklistItem.deleteMany({ consultationId }),
+      Map.deleteMany({ consultationId }),
+      Consultation.deleteOne({ _id: consultationId }),
+    ]);
+
+    // Also try to delete context chunks and chat messages if those models exist
+    try {
+      const { ContextChunk } = await import('../models/ContextChunk');
+      await ContextChunk.deleteMany({ userId, 'metadata.consultationId': consultationId });
+    } catch { /* model may not exist */ }
+
+    try {
+      const { ChatMessage } = await import('../models/ChatMessage');
+      await ChatMessage.deleteMany({ userId, consultationId });
+    } catch { /* model may not exist */ }
+
+    console.log(`Deleted consultation ${consultationId} and all associated data`);
+    res.json({ success: true, message: 'Consultation deleted' });
+  } catch (error) {
+    console.error('Delete consultation error:', error);
+    res.status(500).json({ error: 'Failed to delete consultation' });
   }
 };
 

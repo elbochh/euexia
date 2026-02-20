@@ -1,6 +1,6 @@
 import axios from 'axios';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api';
 
 const api = axios.create({
   baseURL: API_URL,
@@ -13,10 +13,31 @@ api.interceptors.request.use((config) => {
     const token = localStorage.getItem('euexia_token');
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
+    } else {
+      console.warn('[API] No auth token found in localStorage');
     }
   }
   return config;
 });
+
+// Handle 401 errors - token expired or invalid
+api.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    if (error.response?.status === 401) {
+      console.error('[API] 401 Unauthorized - Token may be expired or invalid');
+      if (typeof window !== 'undefined') {
+        // Clear invalid token
+        localStorage.removeItem('euexia_token');
+        // Redirect to login if not already there
+        if (window.location.pathname !== '/') {
+          window.location.href = '/';
+        }
+      }
+    }
+    return Promise.reject(error);
+  }
+);
 
 // Auth
 export const authApi = {
@@ -32,6 +53,8 @@ export const uploadApi = {
   createConsultation: (data: { title: string; uploads: any[] }) =>
     api.post('/upload/consultation', data),
   getConsultations: () => api.get('/upload/consultations'),
+  deleteConsultation: (consultationId: string) =>
+    api.delete(`/upload/consultation/${consultationId}`),
   uploadFile: (file: File) => {
     const formData = new FormData();
     formData.append('file', file);

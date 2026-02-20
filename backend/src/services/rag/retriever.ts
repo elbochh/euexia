@@ -1,234 +1,238 @@
 import mongoose from 'mongoose';
-import { Consultation } from '../../models/Consultation';
 import { ChecklistItem } from '../../models/ChecklistItem';
 import { GameProgress } from '../../models/GameProgress';
-import { ChatMessage } from '../../models/ChatMessage';
 import { ContextChunk } from '../../models/ContextChunk';
-import {
-  decideContextPolicy,
-  estimateTokensFromText,
-  estimateTokensFromTexts,
-  type RetrievalMode,
-} from './contextPolicy';
+import { estimateTokensFromText } from './contextPolicy';
 import { embedText } from './embeddingService';
-import { invokeTextModel } from '../sagemaker';
 
 export interface RetrievedContext {
-  mode: RetrievalMode;
+  mode: 'vector';
   tokenEstimate: number;
   contextString: string;
-  topChunkIds?: string[];
+  topChunkIds: string[];
 }
 
-function formatChecklistItem(item: any): string {
-  const status = item.isFullyDone
-    ? 'completed'
-    : item.isCompleted
-      ? 'done_this_cycle'
-      : item.unlockAt && new Date() < new Date(item.unlockAt)
-        ? 'locked'
-        : item.nextDueAt && new Date() < new Date(item.nextDueAt)
-          ? 'cooldown'
-          : 'available';
-  return `- ${item.title} (${status}) | ${item.description} | frequency=${item.frequency} | progress=${item.completionCount}/${item.totalRequired || 'ongoing'}`;
+const CONTEXT_TOKEN_BUDGET = Number(process.env.RAG_CONTEXT_TOKEN_BUDGET || 1800);
+const VECTOR_TOP_K = Number(process.env.RAG_VECTOR_TOP_K || 10);
+
+// ---------------------------------------------------------------------------
+// Cosine similarity for MMR
+// ---------------------------------------------------------------------------
+function cosineSim(a: number[], b: number[]): number {
+  let dot = 0;
+  let normA = 0;
+  let normB = 0;
+  for (let i = 0; i < a.length; i++) {
+    dot += a[i] * b[i];
+    normA += a[i] * a[i];
+    normB += b[i] * b[i];
+  }
+  return dot / (Math.sqrt(normA) * Math.sqrt(normB) || 1);
 }
 
-async function summarizeForSmallContextIfNeeded(
-  rawContext: string,
-  shouldSummarize: boolean
-): Promise<string> {
-  if (!shouldSummarize) return rawContext;
-  const prompt = [
-    'Summarize this patient context while preserving exact medication names/doses/schedules, pending checklist tasks, and near-term deadlines.',
-    'Keep the summary factual, concise, and structured for clinical assistant use.',
-    '',
-    rawContext,
-  ].join('\n');
-  const out = await invokeTextModel(prompt);
-  return out.text?.trim() || rawContext;
+// ---------------------------------------------------------------------------
+// MMR (Maximal Marginal Relevance) reranking
+// ---------------------------------------------------------------------------
+interface ChunkHit {
+  content: string;
+  embedding: number[];
+  _id: string;
+  sourceType: string;
+  sourceId: string;
 }
 
-async function buildSmallContext(userId: string, consultationId?: string): Promise<{ context: string; tokenEstimate: number }> {
-  const latestConsultation = consultationId
-    ? await Consultation.findOne({ _id: consultationId, userId }).lean()
-    : await Consultation.findOne({ userId }).sort({ createdAt: -1 }).lean();
+function mmrRerank(
+  queryEmbedding: number[],
+  chunks: ChunkHit[],
+  k: number,
+  lambda = 0.6 // 0.6 = relevance-biased, 0.4 = diversity-biased
+): ChunkHit[] {
+  if (chunks.length <= k) return chunks;
 
-  const activeChecklist = consultationId
-    ? await ChecklistItem.find({ userId, consultationId }).sort({ order: 1 }).lean()
-    : await ChecklistItem.find({ userId }).sort({ updatedAt: -1 }).limit(20).lean();
+  const selected: ChunkHit[] = [];
+  const remaining = [...chunks];
+  const querySims = remaining.map((c) => cosineSim(queryEmbedding, c.embedding));
 
-  const progress = await GameProgress.findOne({ userId }).lean();
-  const recentMessages = await ChatMessage.find({
-    userId,
-    ...(consultationId ? { consultationId } : {}),
-  })
-    .sort({ createdAt: -1 })
-    .limit(12)
-    .lean();
+  while (selected.length < k && remaining.length > 0) {
+    let bestIdx = 0;
+    let bestScore = -Infinity;
 
-  const recentConsultations = await Consultation.find({ userId })
-    .sort({ createdAt: -1 })
-    .limit(3)
-    .lean();
+    for (let i = 0; i < remaining.length; i++) {
+      const relevance = querySims[i];
+      let maxDiversity = 0;
+      for (const sel of selected) {
+        const sim = cosineSim(remaining[i].embedding, sel.embedding);
+        if (sim > maxDiversity) maxDiversity = sim;
+      }
+      const mmrScore = lambda * relevance - (1 - lambda) * maxDiversity;
+      if (mmrScore > bestScore) {
+        bestScore = mmrScore;
+        bestIdx = i;
+      }
+    }
 
-  const uploadsSection = (latestConsultation?.uploads || [])
-    .map((u, i) => `- upload#${i + 1} type=${u.type} summary=${(u.summary || '').slice(0, 700)}`)
-    .join('\n');
-  const checklistSection = activeChecklist.map(formatChecklistItem).join('\n');
-  const chatSection = recentMessages
-    .reverse()
-    .map((m) => `${m.role.toUpperCase()}: ${m.content}`)
-    .join('\n');
-  const consultSection = recentConsultations
-    .map((c) => `- ${c.title} (${new Date(c.createdAt).toISOString()}): ${(c.aggregatedSummary || c.checklistParagraph || '').slice(0, 500)}`)
-    .join('\n');
+    selected.push(remaining[bestIdx]);
+    remaining.splice(bestIdx, 1);
+    querySims.splice(bestIdx, 1);
+  }
 
-  const raw = [
-    'PATIENT_CONTEXT',
-    `consultation_title: ${latestConsultation?.title || 'N/A'}`,
-    `consultation_summary: ${latestConsultation?.aggregatedSummary || latestConsultation?.checklistParagraph || 'N/A'}`,
-    '',
-    'UPLOAD_SUMMARIES',
-    uploadsSection || 'N/A',
-    '',
-    'CHECKLIST',
-    checklistSection || 'N/A',
-    '',
-    'PROGRESSION',
-    `level=${progress?.level || 1} xp=${progress?.xp || 0} streak=${progress?.streak || 0} totalCompleted=${progress?.totalCompleted || 0}`,
-    '',
-    'RECENT_CHAT',
-    chatSection || 'N/A',
-    '',
-    'RECENT_CONSULTATIONS',
-    consultSection || 'N/A',
-  ].join('\n');
-
-  return { context: raw, tokenEstimate: estimateTokensFromText(raw) };
+  return selected;
 }
 
-async function buildVectorContext(
+// ---------------------------------------------------------------------------
+// Text-level deduplication for retrieved blocks
+// ---------------------------------------------------------------------------
+function dedupeTextBlocks(blocks: string[]): string[] {
+  const kept: string[] = [];
+  for (const block of blocks) {
+    const words = new Set(
+      block
+        .toLowerCase()
+        .replace(/[^a-z0-9\s]/g, '')
+        .split(/\s+/)
+    );
+    let isDup = false;
+    for (const k of kept) {
+      const kWords = new Set(
+        k
+          .toLowerCase()
+          .replace(/[^a-z0-9\s]/g, '')
+          .split(/\s+/)
+      );
+      const overlap = [...words].filter((w) => kWords.has(w)).length;
+      if (overlap / Math.max(words.size, kWords.size, 1) > 0.6) {
+        isDup = true;
+        break;
+      }
+    }
+    if (!isDup) kept.push(block);
+  }
+  return kept;
+}
+
+function trimToCharBudget(text: string, maxChars: number): string {
+  if (text.length <= maxChars) return text;
+  return text.slice(0, maxChars).trim() + '\n[...truncated]';
+}
+
+// ---------------------------------------------------------------------------
+// Main retrieval function
+// ---------------------------------------------------------------------------
+
+/**
+ * Retrieve focused patient context for a standalone question.
+ *
+ * Pipeline:
+ *   1. Embed the standalone question
+ *   2. Vector search for top-K relevant chunks
+ *   3. MMR rerank for diversity (avoid near-duplicate chunks)
+ *   4. Text-level deduplication
+ *   5. Append always-include structured data (active checklist + game progress)
+ *   6. Trim to token budget
+ */
+export async function retrieveContext(
   userId: string,
-  query: string,
+  standaloneQuestion: string,
   consultationId?: string
-): Promise<{ context: string; tokenEstimate: number; chunkIds: string[] }> {
-  const embedding = await embedText(query);
-  const vectorIndexName = process.env.MONGODB_VECTOR_INDEX || 'context_embedding_index';
-  const limit = Number(process.env.RAG_VECTOR_TOP_K || 8);
+): Promise<RetrievedContext> {
+  const queryEmbedding = await embedText(standaloneQuestion);
+  const vectorIndexName =
+    process.env.MONGODB_VECTOR_INDEX || 'context_embedding_index';
 
+  // --- Step 1: Vector search for relevant chunks ---
   const filter: Record<string, any> = {
     userId: new mongoose.Types.ObjectId(userId),
+    sourceType: { $in: ['consultation_summary', 'upload_summary', 'checklist_item'] },
   };
-  if (consultationId) filter.consultationId = new mongoose.Types.ObjectId(consultationId);
+  if (consultationId) {
+    filter.consultationId = new mongoose.Types.ObjectId(consultationId);
+  }
 
-  const pipeline: any[] = [
-    {
-      $vectorSearch: {
-        index: vectorIndexName,
-        path: 'embedding',
-        queryVector: embedding,
-        numCandidates: Math.max(limit * 8, 40),
-        limit,
-        filter,
+  let hits: ChunkHit[] = [];
+  try {
+    hits = await ContextChunk.aggregate([
+      {
+        $vectorSearch: {
+          index: vectorIndexName,
+          path: 'embedding',
+          queryVector: queryEmbedding,
+          numCandidates: Math.max(VECTOR_TOP_K * 10, 60),
+          limit: VECTOR_TOP_K,
+          filter,
+        },
       },
-    },
-    {
-      $project: {
-        content: 1,
-        sourceType: 1,
-        sourceId: 1,
-      },
-    },
-  ];
+      { $project: { content: 1, sourceType: 1, sourceId: 1, embedding: 1 } },
+    ]);
+  } catch (err) {
+    console.warn('[RAG] Vector search failed, will use fallback:', err);
+  }
 
-  const hits = await ContextChunk.aggregate(pipeline);
-  const chunkIds = hits.map((h: any) => String(h._id));
-  const hitText = hits
-    .map((h: any, idx: number) => `- chunk#${idx + 1} source=${h.sourceType}:${h.sourceId}\n${h.content}`)
-    .join('\n\n');
+  // --- Step 2: MMR rerank for diversity ---
+  const diverse = mmrRerank(queryEmbedding, hits, Math.min(5, hits.length));
 
+  // --- Step 3: Text-level deduplication ---
+  const chunkTexts = diverse.map((h) => (h.content || '').trim());
+  const uniqueTexts = dedupeTextBlocks(chunkTexts);
+  const retrievedSection =
+    uniqueTexts.length > 0
+      ? uniqueTexts
+          .map((t, i) => `[${i + 1}] ${trimToCharBudget(t, 400)}`)
+          .join('\n\n')
+      : 'No relevant records found.';
+
+  // --- Step 4: Always-include structured data (compact) ---
   const activeChecklist = await ChecklistItem.find({
     userId,
     ...(consultationId ? { consultationId } : {}),
     isFullyDone: false,
   })
     .sort({ order: 1 })
-    .limit(12)
-    .lean();
-  const progress = await GameProgress.findOne({ userId }).lean();
-  const recentMessages = await ChatMessage.find({
-    userId,
-    ...(consultationId ? { consultationId } : {}),
-  })
-    .sort({ createdAt: -1 })
-    .limit(6)
+    .limit(10)
     .lean();
 
-  const context = [
-    'RETRIEVED_PATIENT_CONTEXT',
-    hitText || 'No vector chunks found.',
+  const progress = await GameProgress.findOne({ userId }).lean();
+
+  const checklistLines = activeChecklist.map((item: any) => {
+    const status = item.isCompleted
+      ? '✓'
+      : item.unlockAt && new Date() < new Date(item.unlockAt)
+        ? '🔒'
+        : '○';
+    return `${status} ${item.title} (${item.frequency}, ${item.completionCount}/${item.totalRequired || '∞'})`;
+  });
+
+  // --- Step 5: Assemble context ---
+  const contextString = [
+    'RELEVANT_MEDICAL_CONTEXT:',
+    retrievedSection,
     '',
-    'ALWAYS_INCLUDE_ACTIVE_CHECKLIST',
-    activeChecklist.map(formatChecklistItem).join('\n') || 'N/A',
+    'ACTIVE_TASKS:',
+    checklistLines.join('\n') || 'None',
     '',
-    'ALWAYS_INCLUDE_PROGRESSION',
-    `level=${progress?.level || 1} xp=${progress?.xp || 0} streak=${progress?.streak || 0} totalCompleted=${progress?.totalCompleted || 0}`,
-    '',
-    'RECENT_CHAT',
-    recentMessages
-      .reverse()
-      .map((m) => `${m.role.toUpperCase()}: ${m.content}`)
-      .join('\n') || 'N/A',
+    'GAME_PROGRESS:',
+    `Level ${progress?.level || 1} | XP ${progress?.xp || 0} | Streak ${progress?.streak || 0}`,
   ].join('\n');
 
+  // --- Step 6: Trim to token budget ---
+  const finalContext = trimToCharBudget(
+    contextString,
+    CONTEXT_TOKEN_BUDGET * 4
+  );
+
   return {
-    context,
-    tokenEstimate: estimateTokensFromText(context),
-    chunkIds,
+    mode: 'vector',
+    tokenEstimate: estimateTokensFromText(finalContext),
+    contextString: finalContext,
+    topChunkIds: diverse.map((h) => String(h._id)),
   };
 }
 
-export async function retrieveAdaptiveContext(
-  userId: string,
-  query: string,
-  consultationId?: string
-): Promise<RetrievedContext> {
-  const small = await buildSmallContext(userId, consultationId);
-  const policy = decideContextPolicy(small.tokenEstimate);
-
-  if (policy.mode === 'small') {
-    const contextString = await summarizeForSmallContextIfNeeded(
-      small.context,
-      policy.shouldSummarizeSmallContext
-    );
-    return {
-      mode: 'small',
-      tokenEstimate: estimateTokensFromText(contextString),
-      contextString,
-      topChunkIds: [],
-    };
-  }
-
-  try {
-    const vector = await buildVectorContext(userId, query, consultationId);
-    return {
-      mode: 'vector',
-      tokenEstimate: vector.tokenEstimate,
-      contextString: vector.context,
-      topChunkIds: vector.chunkIds,
-    };
-  } catch (error) {
-    console.warn('[RAG] Vector retrieval failed, falling back to small context:', error);
-    return {
-      mode: 'small',
-      tokenEstimate: small.tokenEstimate,
-      contextString: small.context,
-      topChunkIds: [],
-    };
-  }
+/**
+ * Estimate combined token count for a chat request (user prompt + context).
+ */
+export function estimateChatRequestTokens(
+  userPrompt: string,
+  contextString: string
+): number {
+  return estimateTokensFromText(userPrompt) + estimateTokensFromText(contextString);
 }
-
-export function estimateChatRequestTokens(userPrompt: string, contextString: string): number {
-  return estimateTokensFromTexts([userPrompt, contextString]);
-}
-

@@ -15,81 +15,69 @@ export interface ChecklistItemData {
   timeOfDay: string;          // preferred time: "morning", "afternoon", "evening", "night", "any"
 }
 
-/**
- * Checklist Structurer Agent: converts a care plan paragraph into a
- * structured JSON list of checklist items with TIMING constraints.
- */
-export async function structureChecklist(paragraph: string): Promise<ChecklistItemData[]> {
-  const prompt = `You are a clinical AI assistant. Convert the care plan below into a JSON array of SPECIFIC, ACTIONABLE checklist items with TIMING information.
+/* ------------------------------------------------------------------ */
+/*  Prompt builders — keep them short to leave room for model output  */
+/* ------------------------------------------------------------------ */
 
-CRITICAL RULES:
-1. Each item must be specific enough that the patient knows EXACTLY what to do, when, and for how long.
-2. Include medication names, dosages, times, dates, and specific instructions.
-3. Break down complex instructions into separate items (e.g., separate item per medication).
-4. Assign realistic TIMING — patients should NOT be able to check off everything at once.
+function buildStructuredPrompt(paragraph: string): string {
+  return `You are a clinical AI assistant. Convert the care plan into a JSON array.
 
-For EACH item, provide these fields:
-- "title": Short, specific action (include medication/test name). Max 60 chars.
-- "description": Detailed step-by-step instructions. Include exact dosage, timing, duration, and any special notes.
-- "frequency": Specific schedule. Use: "once", "daily", "twice daily", "three times daily", "every X hours", "weekly", "every X days", "as needed"
-- "category": One of: "medication", "nutrition", "exercise", "monitoring", "appointment", "test", "lifestyle", "general"
-- "xpReward": 5-30 (higher for critical items like medications=25, appointments=20, monitoring=15, lifestyle=10)
-- "coinReward": 3-15 (proportional to xpReward)
-- "unlockAfterHours": Hours from NOW before this task becomes available. Use:
-    • 0 for tasks that can be done right now (e.g., "take first dose now")
-    • 8 for "every 8 hours" second dose
-    • 24 for tasks starting tomorrow
-    • 168 for tasks starting in 1 week
-    • 336 for tasks starting in 2 weeks
-- "cooldownHours": Hours between completions for recurring tasks. Use:
-    • 0 for one-time tasks (appointment, single test)
-    • 6, 8, 12, 24 for medications (matching their frequency)
-    • 24 for daily tasks (exercise, monitoring)
-    • 168 for weekly tasks
-- "totalRequired": How many times this needs to be completed:
-    • 1 for one-time tasks (appointment, single test)
-    • 7 for a 7-day medication course (daily)
-    • 14 for a 14-day course
-    • 21 for "twice daily for 10 days" (round up)
-    • 0 for ongoing/indefinite tasks (lifestyle changes, chronic medication)
-- "durationDays": How many days this task is relevant:
-    • 0 for ongoing/indefinite
-    • 7 for a 7-day course
-    • 14 for 2 weeks
-    • 30 for 1 month
-- "timeOfDay": When to do it: "morning", "afternoon", "evening", "night", "any"
+RULES:
+1. One item per medication, test, appointment, or lifestyle instruction.
+2. "title" must be SHORT and CLEAN — just the action + medicine name (e.g. "Take Bisoprolol", "Check INR levels", "Walk 30 minutes"). NO dosage, NO frequency, NO duration in the title.
+3. "description" must be HELPFUL and PRACTICAL for the patient:
+   - For medications: include exact dose, how many tablets, before/after meals, with water, morning/evening, duration, and any warnings.
+   - For lifestyle: include specific practical tips the patient can follow.
+   - For appointments: include what to bring, what to mention.
+   - Write as if advising a friend — warm, clear, actionable.
+4. Return ONLY a valid JSON array — no explanation, no markdown.
 
-GOOD EXAMPLES:
+JSON schema for each object:
+{
+  "title": "string (SHORT, max 30 chars, just action + name, e.g. 'Take Bisoprolol')",
+  "description": "string (practical advice: dose, when, with/without food, tips)",
+  "frequency": "once|daily|twice daily|three times daily|every X hours|weekly|as needed",
+  "category": "medication|nutrition|exercise|monitoring|appointment|test|lifestyle|general",
+  "xpReward": 5-30,
+  "coinReward": 3-15,
+  "unlockAfterHours": 0,
+  "cooldownHours": 0-168,
+  "totalRequired": 0-999,
+  "durationDays": 0-365,
+  "timeOfDay": "morning|afternoon|evening|night|any"
+}
+
+Example:
 [
   {
-    "title": "Take Amoxicillin 500mg (morning)",
-    "description": "Take 1 capsule of Amoxicillin 500mg with a full glass of water and food. Take at approximately 8:00 AM. Do not skip doses even if you feel better. Complete the full 10-day course.",
+    "title": "Take Bisoprolol",
+    "description": "Take 1 tablet (2.5mg) every morning with breakfast. Swallow with a full glass of water. Do not skip doses — this helps control your heart rate. Continue for 2 weeks.",
     "frequency": "daily",
     "category": "medication",
     "xpReward": 25,
     "coinReward": 12,
     "unlockAfterHours": 0,
     "cooldownHours": 24,
-    "totalRequired": 10,
-    "durationDays": 10,
+    "totalRequired": 14,
+    "durationDays": 14,
     "timeOfDay": "morning"
   },
   {
-    "title": "Take Amoxicillin 500mg (evening)",
-    "description": "Take 1 capsule of Amoxicillin 500mg with food at approximately 8:00 PM. This is your second daily dose — maintain 12 hours between doses.",
+    "title": "Take Omeprazole",
+    "description": "Take 1 capsule (40mg) 30 minutes before breakfast on an empty stomach. This protects your stomach lining. Continue for 2 weeks.",
     "frequency": "daily",
     "category": "medication",
     "xpReward": 25,
     "coinReward": 12,
-    "unlockAfterHours": 12,
+    "unlockAfterHours": 0,
     "cooldownHours": 24,
-    "totalRequired": 10,
-    "durationDays": 10,
-    "timeOfDay": "evening"
+    "totalRequired": 14,
+    "durationDays": 14,
+    "timeOfDay": "morning"
   },
   {
-    "title": "Schedule follow-up with Dr. Smith",
-    "description": "Call Dr. Smith's office to schedule a follow-up appointment within 2 weeks. Mention you are following up after your consultation for acute anal fissure treatment.",
+    "title": "Book follow-up visit",
+    "description": "Schedule a follow-up appointment within 2 weeks. Bring your medication list and any blood test results. Mention how you felt on the new medications.",
     "frequency": "once",
     "category": "appointment",
     "xpReward": 20,
@@ -99,138 +87,369 @@ GOOD EXAMPLES:
     "totalRequired": 1,
     "durationDays": 14,
     "timeOfDay": "any"
-  },
-  {
-    "title": "Sitz bath (warm soak)",
-    "description": "Sit in a warm sitz bath (shallow warm water covering the hips) for 15-20 minutes. This reduces pain and promotes healing. Use plain warm water — no soap or additives.",
-    "frequency": "three times daily",
-    "category": "lifestyle",
-    "xpReward": 15,
-    "coinReward": 8,
-    "unlockAfterHours": 0,
-    "cooldownHours": 6,
-    "totalRequired": 0,
-    "durationDays": 14,
-    "timeOfDay": "any"
-  },
-  {
-    "title": "Increase fiber intake to 25-30g",
-    "description": "Eat high-fiber foods throughout the day: whole grains (oatmeal, whole wheat bread), fruits (apples, pears, berries), vegetables (broccoli, carrots), and legumes (lentils, beans). Target 25-30g of fiber daily to soften stools.",
-    "frequency": "daily",
-    "category": "nutrition",
-    "xpReward": 15,
-    "coinReward": 8,
-    "unlockAfterHours": 0,
-    "cooldownHours": 24,
-    "totalRequired": 0,
-    "durationDays": 0,
-    "timeOfDay": "any"
-  },
-  {
-    "title": "Drink 8+ glasses of water",
-    "description": "Drink at least 8 glasses (2 litres) of water throughout the day. Proper hydration softens stools and reduces straining. Avoid excessive caffeine and alcohol as they can dehydrate.",
-    "frequency": "daily",
-    "category": "nutrition",
-    "xpReward": 10,
-    "coinReward": 5,
-    "unlockAfterHours": 0,
-    "cooldownHours": 24,
-    "totalRequired": 0,
-    "durationDays": 0,
-    "timeOfDay": "morning"
   }
 ]
 
-BAD EXAMPLES (too vague — NEVER do this):
-- { "title": "Take medication", "description": "Follow doctor's instructions" }
-- { "title": "Eat healthy", "description": "Maintain a good diet" }
-- { "title": "Follow up", "description": "See doctor when needed" }
-
-Care plan paragraph:
+Care plan:
 ${paragraph}
 
-Return ONLY a valid JSON array, no other text:`;
+JSON array:`;
+}
 
-  const result = await invokeTextModel(prompt);
+function buildSimpleRetryPrompt(paragraph: string): string {
+  return `Convert this medical care plan into a JSON array. Each medication, test, appointment, or lifestyle instruction = 1 object.
 
-  try {
-    // Extract JSON array using balanced bracket counting (robust against extra text)
-    let jsonStr = result.text.trim();
+TITLE RULE: Short name only (e.g. "Take Bisoprolol", "Check INR", "Eat more fiber"). No dose or frequency in title.
+DESCRIPTION RULE: Include dose, timing, before/after meals, practical patient advice, duration.
 
-    // Remove markdown code blocks if present
-    jsonStr = jsonStr.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/\s*```$/i, '');
+Fields: title (short name), description (practical advice with dose), frequency, category, xpReward (5-30), coinReward (3-15), unlockAfterHours, cooldownHours, totalRequired, durationDays, timeOfDay.
 
-    // Find the JSON array by looking for balanced brackets
-    const startIndex = jsonStr.indexOf('[');
-    if (startIndex === -1) {
-      throw new Error('No JSON array found in response');
-    }
+Return ONLY a JSON array.
 
-    // Find the matching closing bracket by counting brackets
-    let bracketCount = 0;
-    let endIndex = startIndex;
-    for (let i = startIndex; i < jsonStr.length; i++) {
-      if (jsonStr[i] === '[') bracketCount++;
-      if (jsonStr[i] === ']') bracketCount--;
-      if (bracketCount === 0) {
-        endIndex = i + 1;
-        break;
-      }
-    }
+Care plan:
+${paragraph}
 
-    // Extract just the JSON array portion
-    jsonStr = jsonStr.substring(startIndex, endIndex);
+[`;
+}
 
-    // Try to parse
-    const items: ChecklistItemData[] = JSON.parse(jsonStr);
+/* ------------------------------------------------------------------ */
+/*  JSON extraction & repair                                          */
+/* ------------------------------------------------------------------ */
 
-    // Validate it's an array with items
-    if (!Array.isArray(items) || items.length === 0) {
-      throw new Error('Parsed JSON is not a non-empty array');
-    }
+/**
+ * Extract a JSON array from potentially messy model output.
+ * Handles: markdown fences, leading text, truncated JSON.
+ */
+function extractJsonArray(raw: string): any[] {
+  let text = raw.trim();
 
-    // Validate each item has required fields and fill in defaults
-    const validItems = items
-      .filter((item: any) => item && item.title && item.description)
-      .map((item: any) => ({
-        title: String(item.title).slice(0, 80),
-        description: String(item.description),
-        frequency: item.frequency || 'once',
-        category: item.category || 'general',
-        xpReward: typeof item.xpReward === 'number' ? item.xpReward : 10,
-        coinReward: typeof item.coinReward === 'number' ? item.coinReward : 5,
-        // Timing fields with safe defaults
-        unlockAfterHours: typeof item.unlockAfterHours === 'number' ? Math.max(0, item.unlockAfterHours) : 0,
-        cooldownHours: typeof item.cooldownHours === 'number' ? Math.max(0, item.cooldownHours) : 0,
-        totalRequired: typeof item.totalRequired === 'number' ? Math.max(0, item.totalRequired) : 1,
-        durationDays: typeof item.durationDays === 'number' ? Math.max(0, item.durationDays) : 0,
-        timeOfDay: ['morning', 'afternoon', 'evening', 'night', 'any'].includes(item.timeOfDay) ? item.timeOfDay : 'any',
-      }));
+  // Strip markdown code fences (```json ... ``` or ``` ... ```)
+  text = text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/i, '');
 
-    if (validItems.length === 0) {
-      throw new Error('No valid checklist items found in parsed JSON');
-    }
-
-    console.log(`Successfully parsed ${validItems.length} checklist items from AI`);
-    return validItems;
-  } catch (error) {
-    console.error('Failed to parse checklist JSON, using fallback:', error);
-    console.error('Response text (first 500 chars):', result.text.substring(0, 500));
-    // Fallback: create a single item from the paragraph
-    return [
-      {
-        title: 'Follow care plan',
-        description: paragraph.substring(0, 500),
-        frequency: 'daily',
-        category: 'general',
-        xpReward: 10,
-        coinReward: 5,
-        unlockAfterHours: 0,
-        cooldownHours: 24,
-        totalRequired: 0,
-        durationDays: 0,
-        timeOfDay: 'any',
-      },
-    ];
+  // Find first '[' 
+  const start = text.indexOf('[');
+  if (start === -1) {
+    throw new Error('No JSON array opening bracket found');
   }
+
+  // Try balanced bracket extraction first
+  let bracketCount = 0;
+  let end = -1;
+  let inString = false;
+  let escaped = false;
+
+  for (let i = start; i < text.length; i++) {
+    const ch = text[i];
+
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (ch === '\\') {
+      escaped = true;
+      continue;
+    }
+    if (ch === '"') {
+      inString = !inString;
+      continue;
+    }
+    if (inString) continue;
+
+    if (ch === '[') bracketCount++;
+    if (ch === ']') bracketCount--;
+    if (bracketCount === 0) {
+      end = i + 1;
+      break;
+    }
+  }
+
+  // Case 1: Found balanced brackets — standard parse
+  if (end !== -1) {
+    const jsonStr = text.substring(start, end);
+    const parsed = JSON.parse(jsonStr);
+    if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+    throw new Error('Parsed result is empty array');
+  }
+
+  // Case 2: Truncated output — try to repair
+  console.warn('[Checklist] JSON appears truncated, attempting repair...');
+  let truncated = text.substring(start);
+
+  // Remove trailing incomplete object (cut at last complete '}')
+  const lastCloseBrace = truncated.lastIndexOf('}');
+  if (lastCloseBrace === -1) {
+    throw new Error('No complete JSON object found in truncated output');
+  }
+  truncated = truncated.substring(0, lastCloseBrace + 1);
+
+  // Close the array
+  truncated = truncated.trimEnd();
+  if (truncated.endsWith(',')) {
+    truncated = truncated.slice(0, -1);
+  }
+  truncated += ']';
+
+  const repaired = JSON.parse(truncated);
+  if (Array.isArray(repaired) && repaired.length > 0) {
+    console.log(`[Checklist] Repaired truncated JSON — recovered ${repaired.length} items`);
+    return repaired;
+  }
+  throw new Error('Repaired JSON is empty');
+}
+
+/* ------------------------------------------------------------------ */
+/*  Validation & defaults                                              */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Clean model-generated titles: strip dosage/frequency info, keep just action + name.
+ * "Take Bisoprolol 2.5mg orally, once daily, for 2 weeks" → "Take Bisoprolol"
+ */
+function cleanTitle(raw: string): string {
+  let t = raw.trim();
+
+  // Remove anything after a dose pattern (number + mg/mcg/ml)
+  t = t.replace(/\s+\d+\s*(?:mg|mcg|ml|g|tablets?|capsules?)\b.*/i, '');
+  // Remove trailing frequency/duration phrases
+  t = t.replace(/\s*(?:,\s*)?(?:once|twice|three times|daily|orally|for \d+|every \d+).*$/i, '');
+  // Remove parenthetical info like (morning)
+  t = t.replace(/\s*\(.*?\)\s*/g, '');
+  // Trim trailing punctuation / whitespace
+  t = t.replace(/[\s,.\-:]+$/, '').trim();
+
+  // Cap at 35 chars, cut at last word boundary
+  if (t.length > 35) {
+    t = t.substring(0, 35);
+    const lastSpace = t.lastIndexOf(' ');
+    if (lastSpace > 10) t = t.substring(0, lastSpace);
+  }
+
+  return t || raw.slice(0, 35);
+}
+
+function validateAndNormalize(items: any[]): ChecklistItemData[] {
+  const validCategories = ['medication', 'nutrition', 'exercise', 'monitoring', 'appointment', 'test', 'lifestyle', 'general'];
+  const validTimes = ['morning', 'afternoon', 'evening', 'night', 'any'];
+
+  return items
+    .filter((item: any) => item && typeof item === 'object' && item.title && item.description)
+    .map((item: any) => ({
+      title: cleanTitle(String(item.title)),
+      description: String(item.description),
+      frequency: item.frequency || 'once',
+      category: validCategories.includes(item.category) ? item.category : 'general',
+      xpReward: typeof item.xpReward === 'number' ? Math.min(30, Math.max(5, item.xpReward)) : 10,
+      coinReward: typeof item.coinReward === 'number' ? Math.min(15, Math.max(3, item.coinReward)) : 5,
+      unlockAfterHours: typeof item.unlockAfterHours === 'number' ? Math.max(0, item.unlockAfterHours) : 0,
+      cooldownHours: typeof item.cooldownHours === 'number' ? Math.max(0, item.cooldownHours) : 0,
+      totalRequired: typeof item.totalRequired === 'number' ? Math.max(0, item.totalRequired) : 1,
+      durationDays: typeof item.durationDays === 'number' ? Math.max(0, item.durationDays) : 0,
+      timeOfDay: validTimes.includes(item.timeOfDay) ? item.timeOfDay : 'any',
+    }));
+}
+
+/* ------------------------------------------------------------------ */
+/*  Rule-based fallback: split paragraph into items manually           */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Extract a short medicine/action name from a line of text.
+ * e.g. "Bisoprolol 2.5mg once daily orally for 2 weeks" → "Take Bisoprolol"
+ *      "Follow-up appointment in 2 weeks"               → "Book follow-up"
+ */
+function extractShortTitle(line: string, category: string): string {
+  const clean = line
+    .replace(/^\*\*.*?\*\*:?\s*/, '')   // strip markdown bold headers
+    .replace(/^[\d\.\-\*•]+\s*/, '')    // strip list markers
+    .trim();
+
+  if (category === 'medication') {
+    // Try to find the drug name — usually the first capitalized word before dose info
+    const drugMatch = clean.match(/^(?:Take\s+)?([A-Z][a-zA-Z\-]+(?:\s+[A-Z][a-zA-Z\-]+)?)/);
+    if (drugMatch) return `Take ${drugMatch[1]}`;
+    // Fallback: first 2 words
+    const words = clean.split(/\s+/).slice(0, 2).join(' ');
+    return `Take ${words}`;
+  }
+  if (category === 'appointment') return 'Book follow-up visit';
+  if (category === 'test') {
+    const testMatch = clean.match(/(CBC|INR|HbA1c|blood test|x-?ray|scan|MRI|ECG|ultrasound)/i);
+    return testMatch ? `Get ${testMatch[1]} done` : 'Get lab tests done';
+  }
+  if (category === 'monitoring') {
+    const monMatch = clean.match(/(blood pressure|blood sugar|weight|temperature|heart rate)/i);
+    return monMatch ? `Check ${monMatch[1]}` : 'Monitor health';
+  }
+  if (category === 'nutrition') {
+    // Extract key dietary action
+    if (/fiber/i.test(clean)) return 'Eat more fiber';
+    if (/water|hydrat/i.test(clean)) return 'Drink enough water';
+    if (/sodium|salt/i.test(clean)) return 'Reduce salt intake';
+    if (/vegetable/i.test(clean)) return 'Eat more vegetables';
+    if (/fruit/i.test(clean)) return 'Eat more fruits';
+    return 'Follow diet plan';
+  }
+  if (category === 'exercise') {
+    if (/walk/i.test(clean)) return 'Go for a walk';
+    return 'Daily exercise';
+  }
+
+  // General fallback: first few words
+  const shortTitle = clean.split(/\s+/).slice(0, 4).join(' ');
+  return shortTitle.length > 30 ? shortTitle.substring(0, 27) + '...' : shortTitle;
+}
+
+function ruleBasedFallback(paragraph: string): ChecklistItemData[] {
+  const items: ChecklistItemData[] = [];
+
+  // Split by common separators: bullet points, numbered lists, line breaks, semicolons
+  const lines = paragraph
+    .split(/(?:\n|(?:^|\.\s+)(?=\d+\.\s)|(?:^|\s)[\*\-•]\s|;\s*)/gm)
+    .map(l => l.trim())
+    .filter(l => l.length > 15); // skip very short fragments
+
+  // Common medication keywords to detect category
+  const medKeywords = /(?:mg|mcg|ml|tablet|capsule|dose|spray|inhaler|cream|ointment|injection|oral|sublingual|topical|daily|twice|three times|every \d+ hours)/i;
+  const appointmentKeywords = /(?:follow.?up|appointment|schedule|visit|return|check.?up|review)/i;
+  const testKeywords = /(?:blood test|lab|CBC|INR|HbA1c|x.?ray|scan|MRI|ultrasound|ECG|test result)/i;
+  const monitorKeywords = /(?:monitor|check|record|measure|track|blood pressure|weight|blood sugar|temperature)/i;
+  const nutritionKeywords = /(?:diet|eat|food|fiber|fruit|vegetable|drink|water|sodium|salt|calorie|meal)/i;
+  const exerciseKeywords = /(?:exercise|walk|swim|jog|physical|activity|stretch|yoga|movement)/i;
+
+  for (const line of lines) {
+    // Determine category
+    let category = 'general';
+    if (medKeywords.test(line)) category = 'medication';
+    else if (appointmentKeywords.test(line)) category = 'appointment';
+    else if (testKeywords.test(line)) category = 'test';
+    else if (monitorKeywords.test(line)) category = 'monitoring';
+    else if (nutritionKeywords.test(line)) category = 'nutrition';
+    else if (exerciseKeywords.test(line)) category = 'exercise';
+
+    const cleanLine = line.replace(/^\*\*.*?\*\*:?\s*/, '').replace(/^[\d\.\-\*•]+\s*/, '');
+    const title = extractShortTitle(cleanLine, category);
+
+    const xpMap: Record<string, number> = {
+      medication: 25, appointment: 20, test: 20, monitoring: 15, nutrition: 10, exercise: 15, lifestyle: 10, general: 10,
+    };
+
+    items.push({
+      title,
+      description: cleanLine,
+      frequency: category === 'medication' ? 'daily' : 'once',
+      category,
+      xpReward: xpMap[category] || 10,
+      coinReward: Math.round((xpMap[category] || 10) / 2),
+      unlockAfterHours: 0,
+      cooldownHours: category === 'medication' ? 24 : 0,
+      totalRequired: category === 'appointment' || category === 'test' ? 1 : 0,
+      durationDays: 14,
+      timeOfDay: 'any',
+    });
+  }
+
+  // Deduplicate by title similarity
+  const seen = new Set<string>();
+  const deduped = items.filter(item => {
+    const key = item.title.toLowerCase().replace(/[^a-z0-9]/g, '').substring(0, 20);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+
+  return deduped.length > 0 ? deduped : [];
+}
+
+/* ------------------------------------------------------------------ */
+/*  Main entry point                                                   */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Checklist Structurer Agent: converts a care plan paragraph into a
+ * structured JSON list of checklist items with TIMING constraints.
+ *
+ * Strategy:
+ *  1. Ask model with structured prompt (4096 output tokens)
+ *  2. If JSON parse fails → repair truncated JSON
+ *  3. If still fails → retry with simpler prompt
+ *  4. If still fails → rule-based splitting as last resort
+ */
+export async function structureChecklist(paragraph: string): Promise<ChecklistItemData[]> {
+  // ── Attempt 1: Structured prompt ──
+  console.log('[Checklist] Attempt 1: Structured prompt...');
+  try {
+    const prompt = buildStructuredPrompt(paragraph);
+    const result = await invokeTextModel(prompt, {
+      max_new_tokens: 4096,
+      temperature: 0.1,
+      return_full_text: false,
+      repetition_penalty: 1.05,
+    });
+
+    console.log('[Checklist] Raw response length:', result.text.length);
+    console.log('[Checklist] Raw response (first 300):', result.text.substring(0, 300));
+
+    const parsed = extractJsonArray(result.text);
+    const valid = validateAndNormalize(parsed);
+
+    if (valid.length > 0) {
+      console.log(`[Checklist] ✅ Attempt 1 succeeded: ${valid.length} items`);
+      return valid;
+    }
+  } catch (err: any) {
+    console.warn(`[Checklist] Attempt 1 failed: ${err.message}`);
+  }
+
+  // ── Attempt 2: Simpler prompt (prefill the opening bracket) ──
+  console.log('[Checklist] Attempt 2: Simple retry prompt...');
+  try {
+    const retryPrompt = buildSimpleRetryPrompt(paragraph);
+    const result = await invokeTextModel(retryPrompt, {
+      max_new_tokens: 4096,
+      temperature: 0.15,
+      return_full_text: false,
+      repetition_penalty: 1.05,
+    });
+
+    // Prepend the '[' we used to prefill
+    const fullText = '[' + result.text;
+    console.log('[Checklist] Retry response length:', fullText.length);
+    console.log('[Checklist] Retry response (first 300):', fullText.substring(0, 300));
+
+    const parsed = extractJsonArray(fullText);
+    const valid = validateAndNormalize(parsed);
+
+    if (valid.length > 0) {
+      console.log(`[Checklist] ✅ Attempt 2 succeeded: ${valid.length} items`);
+      return valid;
+    }
+  } catch (err: any) {
+    console.warn(`[Checklist] Attempt 2 failed: ${err.message}`);
+  }
+
+  // ── Attempt 3: Rule-based fallback ──
+  console.log('[Checklist] Attempt 3: Rule-based splitting...');
+  const ruleBased = ruleBasedFallback(paragraph);
+  if (ruleBased.length > 0) {
+    console.log(`[Checklist] ✅ Rule-based fallback produced ${ruleBased.length} items`);
+    return ruleBased;
+  }
+
+  // ── Ultimate fallback: single generic item (should rarely reach here) ──
+  console.warn('[Checklist] ⚠️ All attempts failed — using single-item fallback');
+  return [
+    {
+      title: 'Follow care plan',
+      description: paragraph.substring(0, 500),
+      frequency: 'daily',
+      category: 'general',
+      xpReward: 10,
+      coinReward: 5,
+      unlockAfterHours: 0,
+      cooldownHours: 24,
+      totalRequired: 0,
+      durationDays: 0,
+      timeOfDay: 'any',
+    },
+  ];
 }

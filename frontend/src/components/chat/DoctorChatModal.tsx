@@ -17,6 +17,59 @@ interface ChatMessage {
   createdAt: string;
 }
 
+/** Render simple markdown (bold, italic, bullet points) as React elements */
+function renderMarkdown(text: string) {
+  // Split into lines to handle bullet points
+  const lines = text.split('\n');
+
+  return lines.map((line, lineIdx) => {
+    const trimmed = line.trim();
+
+    // Bullet point lines (•, -, *)
+    const bulletMatch = trimmed.match(/^[•\-\*]\s+(.*)/);
+    const content = bulletMatch ? bulletMatch[1] : line;
+
+    // Process inline formatting: **bold** and *italic*
+    const parts: React.ReactNode[] = [];
+    let remaining = content;
+    let key = 0;
+
+    while (remaining.length > 0) {
+      // Bold: **text**
+      const boldMatch = remaining.match(/\*\*(.+?)\*\*/);
+      if (boldMatch && boldMatch.index !== undefined) {
+        if (boldMatch.index > 0) {
+          parts.push(<span key={key++}>{remaining.slice(0, boldMatch.index)}</span>);
+        }
+        parts.push(<strong key={key++} className="font-semibold text-white">{boldMatch[1]}</strong>);
+        remaining = remaining.slice(boldMatch.index + boldMatch[0].length);
+        continue;
+      }
+
+      // No more formatting — push the rest
+      parts.push(<span key={key++}>{remaining}</span>);
+      break;
+    }
+
+    if (bulletMatch) {
+      return (
+        <div key={lineIdx} className="flex gap-2 pl-1">
+          <span className="text-blue-300 shrink-0">•</span>
+          <span>{parts}</span>
+        </div>
+      );
+    }
+
+    // Regular line
+    return (
+      <div key={lineIdx}>
+        {parts}
+        {lineIdx < lines.length - 1 && !trimmed ? <br /> : null}
+      </div>
+    );
+  });
+}
+
 export default function DoctorChatModal({
   isOpen,
   consultationId,
@@ -146,13 +199,13 @@ export default function DoctorChatModal({
                   className={`flex ${isUser ? 'justify-end' : 'justify-start'}`}
                 >
                   <div
-                    className={`max-w-[85%] px-3 py-2 rounded-xl text-sm whitespace-pre-wrap ${
+                    className={`max-w-[85%] px-3 py-2 rounded-xl text-sm ${
                       isUser
-                        ? 'bg-blue-500/25 text-blue-100 border border-blue-400/30'
-                        : 'bg-white/10 text-gray-100 border border-white/10'
+                        ? 'bg-blue-500/25 text-blue-100 border border-blue-400/30 whitespace-pre-wrap'
+                        : 'bg-white/10 text-gray-100 border border-white/10 space-y-1'
                     }`}
                   >
-                    {m.content}
+                    {isUser ? m.content : renderMarkdown(m.content)}
                   </div>
                 </div>
               );

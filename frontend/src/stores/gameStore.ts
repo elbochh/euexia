@@ -1,6 +1,6 @@
 'use client';
 import { create } from 'zustand';
-import { authApi, gameApi, checklistApi } from '@/lib/api';
+import { authApi, gameApi, checklistApi, uploadApi } from '@/lib/api';
 
 interface User {
   id: string;
@@ -172,6 +172,7 @@ interface GameStore {
   loadCurrentMap: () => Promise<void>;
   loadMap: (consultationId: string, mapIndex?: number) => Promise<void>;
   loadConsultationsWithMaps: () => Promise<void>;
+  deleteConsultation: (consultationId: string) => Promise<boolean>;
   initFromStorage: () => void;
 }
 
@@ -389,6 +390,24 @@ export const useGameStore = create<GameStore>((set, get) => ({
       set({ consultations: res.data.consultations || [] });
     } catch (error) {
       console.error('Failed to load consultations with maps:', error);
+    }
+  },
+
+  deleteConsultation: async (consultationId: string) => {
+    try {
+      await uploadApi.deleteConsultation(consultationId);
+      // Remove from local state
+      set((state) => ({
+        consultations: state.consultations.filter((c) => c._id !== consultationId),
+        // Clear current map if it was from the deleted consultation
+        ...(state.currentMapInfo?.consultationId === consultationId
+          ? { currentMapInfo: null, mapSpec: null, mapImageUrl: null, checklist: [] }
+          : {}),
+      }));
+      return true;
+    } catch (error) {
+      console.error('Failed to delete consultation:', error);
+      return false;
     }
   },
 

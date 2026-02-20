@@ -19,11 +19,21 @@ export interface SageMakerResponse {
   raw?: any;
 }
 
+export interface TextGenerationOptions {
+  max_new_tokens?: number;
+  temperature?: number;
+  return_full_text?: boolean;
+  repetition_penalty?: number;
+}
+
 /**
  * Invoke OpenAI text model for text-based medical analysis.
  * Kept under the same function name to avoid touching all agent files.
  */
-export async function invokeTextModel(prompt: string): Promise<SageMakerResponse> {
+export async function invokeTextModel(
+  prompt: string,
+  options?: TextGenerationOptions
+): Promise<SageMakerResponse> {
   if (sagemakerConfig.useMock) {
     return mockTextResponse(prompt);
   }
@@ -38,8 +48,11 @@ export async function invokeTextModel(prompt: string): Promise<SageMakerResponse
       Body: JSON.stringify({
         inputs: prompt,
         parameters: {
-          max_new_tokens: 2048,
-          temperature: 0.2,
+          max_new_tokens: options?.max_new_tokens ?? 2048,
+          temperature: options?.temperature ?? 0.2,
+          // TGI may otherwise return prompt+completion in generated_text.
+          return_full_text: options?.return_full_text ?? false,
+          repetition_penalty: options?.repetition_penalty ?? 1.08,
         },
       }),
     });

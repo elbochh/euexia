@@ -1,32 +1,40 @@
 import { Response } from 'express';
 import { AuthRequest } from '../middleware/auth';
 import { ChatMessage } from '../models/ChatMessage';
-import { retrieveAdaptiveContext, estimateChatRequestTokens } from '../services/rag/retriever';
-import { invokeMedGemmaWithLangChain } from '../services/rag/langchainMedGemma';
+import { retrieveContext, estimateChatRequestTokens } from '../services/rag/retriever';
+import { generateChatResponse } from '../services/rag/langchainMedGemma';
+import { condenseQuestion } from '../services/rag/questionCondenser';
 import { indexChatMessageChunk } from '../services/rag/indexer';
 
-const DEFAULT_HISTORY_LIMIT = 40;
-
+// ---------------------------------------------------------------------------
+// System prompt — keep it SHORT so more token budget goes to context + answer
+// ---------------------------------------------------------------------------
 function buildSystemPrompt(contextString: string): string {
-  return [
-    'You are Euexia Doctor Assistant, a precise and supportive medical follow-up assistant.',
-    'Use only the patient context provided below plus the user message.',
-    'Rules:',
-    '1) Do not invent medications, doses, or diagnoses.',
-    '2) If data is missing, say what is missing and suggest next safe step.',
-    '3) Prioritize active checklist tasks and near-term due items.',
-    '4) Keep response concise, actionable, and personalized.',
-    '',
-    'PATIENT_CONTEXT_START',
-    contextString,
-    'PATIENT_CONTEXT_END',
-  ].join('\n');
-}
-
-export const getChatHistory = async (req: AuthRequest, res: Response): Promise<void> => {
+    return [
+      'You are Euexia Doctor Assistant — a concise, supportive medical follow-up chatbot.',
+      '',
+      'RULES:',
+      '• For patient-specific questions (medications, diagnoses, appointments): Use ONLY the patient context below. Never invent patient-specific medications, doses, or diagnoses.',
+      '• For general health questions (nutrition, exercise, wellness): You may provide evidence-based general advice, but prioritize any relevant information from the patient context if available.',
+      '• Give concrete, specific advice (food names, exercise types, exact actions).',
+      '• Max 5 bullet points OR 1 short paragraph. Max ~100 words.',
+      '• Never repeat a sentence you already wrote.',
+      '• If patient-specific info is missing, provide general guidance and suggest consulting their doctor for personalized advice.',
+      '',
+      contextString,
+    ].join('\n');
+  }
+// ---------------------------------------------------------------------------
+// GET /api/chat — chat history
+// ---------------------------------------------------------------------------
+export const getChatHistory = async (
+  req: AuthRequest,
+  res: Response
+): Promise<void> => {
   try {
     const consultationId = req.query.consultationId as string | undefined;
-    const limit = Math.min(Number(req.query.limit || DEFAULT_HISTORY_LIMIT), 100);
+    const limit = Math.min(Number(req.query.limit || 40), 100);
+
     const messages = await ChatMessage.find({
       userId: req.userId!,
       ...(consultationId ? { consultationId } : {}),
@@ -42,7 +50,13 @@ export const getChatHistory = async (req: AuthRequest, res: Response): Promise<v
   }
 };
 
-export const sendChatMessage = async (req: AuthRequest, res: Response): Promise<void> => {
+// ---------------------------------------------------------------------------
+// POST /api/chat — send message (full RAG pipeline)
+// ---------------------------------------------------------------------------
+export const sendChatMessage = async (
+  req: AuthRequest,
+  res: Response
+): Promise<void> => {
   try {
     const userId = req.userId!;
     const { message, consultationId } = req.body as {
@@ -56,61 +70,95 @@ export const sendChatMessage = async (req: AuthRequest, res: Response): Promise<
       return;
     }
 
+    // ---- Save user message ----
     const savedUserMsg = await ChatMessage.create({
       userId,
       consultationId: consultationId || null,
       role: 'user',
       content: userMessage,
     });
-    // Fire-and-forget indexing for user chat message
-    indexChatMessageChunk(String(savedUserMsg._id)).catch((err) =>
-      console.warn('[RAG] index user chat message failed:', err)
-    );
+    // Fire-and-forget indexing for user message only
+    indexChatMessageChunk(String(savedUserMsg._id)).catch(() => {});
 
-    const adaptive = await retrieveAdaptiveContext(userId, userMessage, consultationId);
-    const estimatedTokens = estimateChatRequestTokens(userMessage, adaptive.contextString);
-
-    const history = await ChatMessage.find({
+    // ================================================================
+    // STEP 1 — Condense question using recent chat history
+    // ================================================================
+    const recentHistory = await ChatMessage.find({
       userId,
       ...(consultationId ? { consultationId } : {}),
     })
       .sort({ createdAt: -1 })
-      .limit(12)
+      .limit(6)
       .lean();
 
-    const ai = await invokeMedGemmaWithLangChain({
-      systemPrompt: buildSystemPrompt(adaptive.contextString),
-      history: history
-        .reverse()
-        .map((h) => ({
-          role: h.role === 'assistant' ? 'assistant' : h.role === 'system' ? 'system' : 'user',
-          content: h.content,
-        })),
-      userMessage,
-    });
+    const historyTurns = recentHistory.reverse().map((h) => ({
+      role: h.role as string,
+      content: h.content,
+    }));
 
+    const standaloneQuestion = await condenseQuestion(historyTurns, userMessage);
+    console.log('[RAG] Condensed question:', standaloneQuestion);
+
+    // ================================================================
+    // STEP 2 — Retrieve focused context (vector + MMR + always-include)
+    // ================================================================
+    const context = await retrieveContext(
+      userId,
+      standaloneQuestion,
+      consultationId
+    );
+    console.log(
+      `[RAG] Retrieved context: ~${context.tokenEstimate} tokens, ${context.topChunkIds.length} chunks`
+    );
+
+    // ================================================================
+    // STEP 3 — Generate answer via MedGemma
+    // ================================================================
+    let ai;
+    try {
+      ai = await generateChatResponse({
+        systemPrompt: buildSystemPrompt(context.contextString),
+        userMessage: standaloneQuestion,
+      });
+    } catch (err: any) {
+      const msg = String(err?.message || '');
+      const isTokenError =
+        msg.includes('4096 tokens') || msg.includes('Input validation error');
+      if (!isTokenError) throw err;
+
+      // Retry with minimal context
+      console.warn('[RAG] Token limit hit, retrying with minimal context');
+      const minimalContext = context.contextString.slice(0, 2000);
+      ai = await generateChatResponse({
+        systemPrompt: buildSystemPrompt(minimalContext),
+        userMessage: userMessage.slice(0, 200),
+      });
+    }
+
+    // ================================================================
+    // STEP 4 — Save assistant response (already post-processed in generateChatResponse)
+    // ================================================================
     const savedAssistantMsg = await ChatMessage.create({
       userId,
       consultationId: consultationId || null,
       role: 'assistant',
-      content: ai.text,
-      retrievalMode: adaptive.mode,
+      content: ai.text || 'I could not generate a response. Please try again.',
+      retrievalMode: context.mode,
       metadata: {
-        contextTokenEstimate: estimatedTokens,
-        vectorTopK: adaptive.topChunkIds?.length || 0,
-        sourceChunkIds: adaptive.topChunkIds || [],
+        contextTokenEstimate: context.tokenEstimate,
+        vectorTopK: context.topChunkIds.length,
+        sourceChunkIds: context.topChunkIds,
+        condensedQuestion: standaloneQuestion,
       },
     });
-    indexChatMessageChunk(String(savedAssistantMsg._id)).catch((err) =>
-      console.warn('[RAG] index assistant chat message failed:', err)
-    );
+    // Do NOT index assistant messages — prevents recursive context pollution
 
     res.json({
       message: savedAssistantMsg,
       retrieval: {
-        mode: adaptive.mode,
-        contextTokenEstimate: estimatedTokens,
-        vectorTopK: adaptive.topChunkIds?.length || 0,
+        mode: context.mode,
+        contextTokenEstimate: context.tokenEstimate,
+        vectorTopK: context.topChunkIds.length,
       },
     });
   } catch (error) {
@@ -118,4 +166,3 @@ export const sendChatMessage = async (req: AuthRequest, res: Response): Promise<
     res.status(500).json({ error: 'Failed to send chat message' });
   }
 };
-

@@ -3,7 +3,7 @@ import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
 import { authMiddleware } from '../middleware/auth';
-import { createConsultation, getConsultations, uploadFile } from '../controllers/upload.controller';
+import { createConsultation, getConsultations, deleteConsultation, uploadFile } from '../controllers/upload.controller';
 
 // Ensure uploads directory exists
 const uploadsDir = path.join(__dirname, '../../uploads');
@@ -40,6 +40,7 @@ const router = Router();
 
 router.post('/consultation', authMiddleware, createConsultation);
 router.get('/consultations', authMiddleware, getConsultations);
+router.delete('/consultation/:consultationId', authMiddleware, deleteConsultation);
 router.post('/file', authMiddleware, upload.single('file'), uploadFile);
 
 export default router;

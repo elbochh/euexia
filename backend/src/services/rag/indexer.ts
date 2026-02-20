@@ -4,19 +4,7 @@ import { ContextChunk, type ContextChunkSourceType } from '../../models/ContextC
 import { ChatMessage } from '../../models/ChatMessage';
 import { estimateTokensFromText } from './contextPolicy';
 import { embedText } from './embeddingService';
-
-function chunkText(text: string, maxChars: number): string[] {
-  const safe = (text || '').trim();
-  if (!safe) return [];
-  if (safe.length <= maxChars) return [safe];
-  const out: string[] = [];
-  let start = 0;
-  while (start < safe.length) {
-    out.push(safe.slice(start, start + maxChars));
-    start += maxChars;
-  }
-  return out;
-}
+import { recursiveSplit, deduplicateChunks } from './textSplitter';
 
 async function upsertChunk(input: {
   userId: string;
@@ -53,17 +41,26 @@ async function upsertChunk(input: {
   );
 }
 
-export async function indexConsultationContext(userId: string, consultationId: string): Promise<void> {
+/**
+ * Index all consultation data (summary, uploads, checklist items) into
+ * semantically-split, deduplicated context chunks for vector search.
+ */
+export async function indexConsultationContext(
+  userId: string,
+  consultationId: string
+): Promise<void> {
   const consultation = await Consultation.findOne({ _id: consultationId, userId }).lean();
   if (!consultation) return;
 
-  const checklistItems = await ChecklistItem.find({ userId, consultationId }).sort({ order: 1 }).lean();
+  const checklistItems = await ChecklistItem.find({ userId, consultationId })
+    .sort({ order: 1 })
+    .lean();
 
-  const summaryChunks = chunkText(
-    consultation.aggregatedSummary || consultation.checklistParagraph || '',
-    1200
-  );
-  for (let i = 0; i < summaryChunks.length; i += 1) {
+  // --- Consultation summary: semantic split + dedup ---
+  const rawSummary =
+    consultation.aggregatedSummary || consultation.checklistParagraph || '';
+  const summaryChunks = deduplicateChunks(recursiveSplit(rawSummary, 600, 80));
+  for (let i = 0; i < summaryChunks.length; i++) {
     await upsertChunk({
       userId,
       consultationId,
@@ -73,11 +70,12 @@ export async function indexConsultationContext(userId: string, consultationId: s
     });
   }
 
-  for (let i = 0; i < (consultation.uploads || []).length; i += 1) {
+  // --- Upload summaries: semantic split + dedup ---
+  for (let i = 0; i < (consultation.uploads || []).length; i++) {
     const upload = consultation.uploads[i];
     if (!upload.summary) continue;
-    const uploadChunks = chunkText(upload.summary, 900);
-    for (let j = 0; j < uploadChunks.length; j += 1) {
+    const uploadChunks = deduplicateChunks(recursiveSplit(upload.summary, 500, 60));
+    for (let j = 0; j < uploadChunks.length; j++) {
       await upsertChunk({
         userId,
         consultationId,
@@ -89,13 +87,14 @@ export async function indexConsultationContext(userId: string, consultationId: s
     }
   }
 
+  // --- Checklist items: one compact chunk per item ---
   for (const item of checklistItems) {
     await upsertChunk({
       userId,
       consultationId,
       sourceType: 'checklist_item',
       sourceId: String(item._id),
-      content: `${item.title}\n${item.description}\nfrequency=${item.frequency}\ncategory=${item.category}`,
+      content: `${item.title}: ${item.description} (${item.frequency}, ${item.category})`,
       metadata: {
         checklistCategory: item.category,
         isActiveChecklist: !item.isFullyDone,
@@ -104,17 +103,22 @@ export async function indexConsultationContext(userId: string, consultationId: s
   }
 }
 
+/**
+ * Index a single user chat message for future vector retrieval.
+ * Assistant messages are NOT indexed to prevent recursive context pollution.
+ */
 export async function indexChatMessageChunk(messageId: string): Promise<void> {
   const msg = await ChatMessage.findById(messageId).lean();
   if (!msg || !msg.content) return;
+  // Only index user messages
+  if (msg.role !== 'user') return;
 
   await upsertChunk({
     userId: String(msg.userId),
     consultationId: msg.consultationId ? String(msg.consultationId) : undefined,
     sourceType: 'chat_message',
     sourceId: String(msg._id),
-    content: `${msg.role}: ${msg.content}`,
-    metadata: { createdAtSource: msg.createdAt },
+    content: msg.content,
+    metadata: { createdAtSource: msg.createdAt, role: msg.role },
   });
 }
-

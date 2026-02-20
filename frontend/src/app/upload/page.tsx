@@ -120,6 +120,13 @@ export default function UploadPage() {
       await new Promise((r) => setTimeout(r, 800));
 
       setProcessingStep('Creating your health checklist...');
+      
+      // Verify token exists before making request
+      const token = typeof window !== 'undefined' ? localStorage.getItem('euexia_token') : null;
+      if (!token) {
+        throw new Error('Authentication required. Please log in again.');
+      }
+      
       const result = await uploadApi.createConsultation({
         title,
         uploads: processedUploads,
@@ -139,9 +146,18 @@ export default function UploadPage() {
       setTimeout(() => {
         router.push('/consultations');
       }, 1500);
-    } catch (error) {
+    } catch (error: any) {
       console.error('Processing failed:', error);
-      setProcessingStep('Processing failed. Please try again.');
+      const errorMessage = error?.response?.data?.error || error?.message || 'Processing failed. Please try again.';
+      
+      if (error?.response?.status === 401) {
+        setProcessingStep('Authentication failed. Please log in again.');
+        setTimeout(() => {
+          router.push('/');
+        }, 2000);
+      } else {
+        setProcessingStep(`Error: ${errorMessage}`);
+      }
     } finally {
       setProcessing(false);
     }
