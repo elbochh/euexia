@@ -304,7 +304,7 @@ function buildImagePrompt(
   } else if (themeKeyLower.includes('vitamin') || themeKeyLower.includes('supplement')) {
     worldMaterial = 'a glowing world of bright vitamin bottles, colorful supplement capsules, and nutrient elements. Trees are radiant vitamin bottles, ground sparkles with capsules. Energetic, vibrant, healthful.';
   } else if (themeKeyLower.includes('medication') || themeKeyLower.includes('pharmacy')) {
-    worldMaterial = 'a positive world of healing elements - colorful medicine bottles, bright wellness symbols, health icons. Trees are vibrant health symbols, ground glows with positive medical elements. Optimistic, healing, hopeful.';
+    worldMaterial = 'a positive world centered on clinical care spaces and healing environments (clinic buildings, wellness plazas, care stations, friendly symbols). Avoid oversized pills as terrain focus. Optimistic, healing, hopeful.';
   } else if (themeKeyLower.includes('fissure') || themeKeyLower.includes('bowel') || themeKeyLower.includes('digestive') || 
              specialtyLower.includes('gastroenterology') || specialtyLower.includes('digestive') ||
              themeKeywords.some(k => k.toLowerCase().includes('fiber') || k.toLowerCase().includes('stool') || k.toLowerCase().includes('bowel'))) {
@@ -321,46 +321,58 @@ function buildImagePrompt(
   const isScrollable = (stepCount || 0) > 6; // Assume scrollable if more than 6 checkpoints
   
   if (isScrollable) {
-    return `Create a vibrant, optimistic TALL VERTICAL SCROLLABLE game map (like Clash of Clans campaign map) that spans from bottom to top.
+    return `Create a vibrant, optimistic TALL VERTICAL SCROLLABLE game map in a MINECRAFT-LIKE BLOCKY DIORAMA STYLE.
 
 CRITICAL LAYOUT REQUIREMENTS FOR SCROLLABLE MAP:
 - VERTICAL ORIENTATION: Map must be TALL and VERTICAL (portrait orientation)
 - FULL HEIGHT SPAN: The map should span the ENTIRE height from bottom edge to top edge
 - CHECKPOINT DISTRIBUTION: Distribute ${stepCount} checkpoints evenly along the FULL HEIGHT of the map, starting from the BOTTOM (checkpoint 1) and progressing upward to the TOP (checkpoint ${stepCount})
 - BOTTOM TO TOP PROGRESSION: Checkpoint 1 should be at the bottom of the image, checkpoint ${stepCount} should be at the top
-- PATH CONNECTS ALL: A single winding path should connect all checkpoints from bottom to top, spanning the full height
-- HIGHLY ZOOMED OUT: The map should be zoomed out enough to show the entire journey from start (bottom) to finish (top)
+- PATH CONNECTS ALL: A single long central road/path should connect all checkpoints from bottom to top, spanning the full height
+- ROAD IN THE MIDDLE: Keep the road roughly around the center corridor of the map while still winding left/right naturally
+- HIGHLY ZOOMED OUT: The camera must be very zoomed out to maximize coverage for large task counts while preserving readable landmarks
 - NO PATH DOTS: Do NOT draw connecting dots, lines, or path patterns - just show the terrain path itself
 - CHECKPOINT MARKERS: Show ${stepCount} distinct circular areas or clear landing spots where milestone coins will be placed, evenly distributed along the vertical path from bottom to top
+- READABLE DETAIL NEAR PATH: Place clear landmarks close to the path so they are visible even at zoomed-out framing
+- CLUTTER BUDGET: Keep visual density medium-low. Do not overcrowd the center lane.
+- CENTER LANE SAFETY: Reserve a clean corridor around the main road (roughly 20-25% of map width) with minimal props so checkpoints/path remain obvious.
+- SIDE DETAIL DISTRIBUTION: Place most decorative props just outside the center lane (left/right bands), not on top of the road/checkpoint circles.
+- LANDMARK SPACING: Use fewer but stronger landmarks; maintain spacing so each landmark is distinguishable.
 
 REFERENCE STYLE:
 - Similar to Clash of Clans campaign map: top-down view, highly zoomed out, tall vertical format
 - Parchment/textured background feel
 - Single continuous map that can be scrolled vertically
 - Path winds from bottom to top connecting all checkpoints
+- Minecraft-like blocky geometry, low-poly voxel-like forms, clean edges, stylized friendly look
 
 THEME REQUIREMENTS (CRITICAL - MUST FOLLOW):
 - Theme: ${specialty}
 - Keywords: ${keywords}
 - World made of: ${worldMaterial}
-- The ENTIRE terrain/landscape must be constructed from ${specialty}-themed elements
+- The ENTIRE terrain/landscape must be constructed from ${specialty}-themed elements of the doctor specialty
 - Place ${specialty}-themed structures, formations, and elements throughout the map
+- PRIORITIZE DOCTOR SPECIALTY CONTEXT over patient consumption checklist items
+- DO NOT make the visual focus about pills, tablets, or consumption instructions unless the specialty itself is pharmacy/medication
 - DO NOT include medical equipment or elements unrelated to ${specialty}
 - For example: If theme is dentistry, the ENTIRE map terrain should be made of teeth, dental tools, oral care elements - NO inhalers, NO blood pressure machines, NO unrelated medical devices
 - The landscape itself (ground, terrain features, structures) must be ${specialty}-themed
 
-STYLE: Top-down game map view, vibrant, colorful, optimistic, high-detail. Bright lighting, positive energy. NO traditional vegetation, NO people, NO text labels, NO path dots, NO connection lines, NO unrelated medical equipment. Pure themed landscape map with ${specialty} theme only. The map should be designed to be scrolled vertically, with checkpoint 1 at the bottom and the final checkpoint at the top.`;
+STYLE: Top-down game map view, vibrant, colorful, optimistic, high-detail. Bright lighting, positive energy. Minecraft-like blocky/voxel aesthetic. NO people, NO text labels, NO path dots, NO connection lines, NO unrelated medical equipment. Pure themed landscape map with ${specialty} theme only. The map should be designed to be scrolled vertically, with checkpoint 1 at the bottom and the final checkpoint at the top.`;
   }
   
-  return `Create a vibrant, optimistic TOP-DOWN ZOOMED-OUT game map view showing multiple checkpoints/stages across a themed landscape.
+  return `Create a vibrant, optimistic TOP-DOWN ZOOMED-OUT game map view in a MINECRAFT-LIKE BLOCKY DIORAMA STYLE showing multiple checkpoints/stages across a themed landscape.
 
 CRITICAL LAYOUT REQUIREMENTS:
 - TOP-DOWN VIEW: Bird's eye view looking down at the map (like Clash of Clans campaign map)
-- ZOOMED OUT: Show multiple checkpoints/stages visible across the entire map area
+- ZOOMED OUT: Show multiple checkpoints/stages visible across the entire map area with strong coverage
 - NO PATH DOTS: Do NOT draw connecting dots, lines, or path patterns between checkpoints
 - NO CONNECTION PATTERNS: The map should show the landscape with checkpoints, but NO visible path connections
 - Checkpoints should be distributed across the map in a logical progression pattern
 - Map should feel like a game world map with multiple locations visible at once
+- CLUTTER BUDGET: Keep visual density medium-low with clear readability around checkpoints.
+- CENTER ROAD READABILITY: Keep the center progression corridor clean; avoid stacking props over checkpoint circles.
+- LANDMARK PRIORITY: Prefer fewer high-quality landmarks over many tiny noisy objects.
 - CHECKPOINT MARKERS: Show circular areas or clear locations where milestone coins will be placed (approximately ${stepCount} checkpoint locations). These should be visible as distinct circular spots or clear landing areas on the terrain where game coins will be rendered. Make these locations obvious and well-positioned along the path progression.
 
 REFERENCE STYLE:
@@ -368,18 +380,21 @@ REFERENCE STYLE:
 - Parchment/textured background feel
 - Multiple checkpoints visible across the terrain
 - NO dots connecting checkpoints, NO path lines visible
+- Minecraft-like blocky geometry, voxel-ish forms, clear silhouettes, positive playful look
 
 THEME REQUIREMENTS (CRITICAL - MUST FOLLOW):
 - Theme: ${specialty}
 - Keywords: ${keywords}
 - World made of: ${worldMaterial}
-- The ENTIRE terrain/landscape must be constructed from ${specialty}-themed elements
+- The ENTIRE terrain/landscape must be constructed from ${specialty}-themed elements of the doctor specialty
 - Place ${specialty}-themed structures, formations, and elements throughout the map
+- PRIORITIZE DOCTOR SPECIALTY CONTEXT over patient consumption checklist items
+- DO NOT make the visual focus about pills, tablets, or consumption instructions unless the specialty itself is pharmacy/medication
 - DO NOT include medical equipment or elements unrelated to ${specialty}
 - For example: If theme is dentistry, the ENTIRE map terrain should be made of teeth, dental tools, oral care elements - NO inhalers, NO blood pressure machines, NO unrelated medical devices
 - The landscape itself (ground, terrain features, structures) must be ${specialty}-themed
 
-STYLE: Top-down game map view, vibrant, colorful, optimistic, high-detail. Bright lighting, positive energy. NO traditional vegetation, NO people, NO text labels, NO path dots, NO connection lines, NO unrelated medical equipment. Pure themed landscape map with ${specialty} theme only.`;
+STYLE: Top-down game map view, vibrant, colorful, optimistic, high-detail. Bright lighting, positive energy. Minecraft-like blocky/voxel aesthetic. NO people, NO text labels, NO path dots, NO connection lines, NO unrelated medical equipment. Pure themed landscape map with ${specialty} theme only.`;
 }
 
 /**

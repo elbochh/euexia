@@ -247,8 +247,10 @@ export default function GameCanvas({
           const texture = await Assets.load(fullImageUrl);
           if (!isRenderActive()) return;
           
-          // Map is always scrollable at "3 phone heights": only 1/3 of the content visible at a time, zoomed on the middle (path).
-          const scrollableMapHeights = 3;
+          // Scroll height based on star count (visual nodes on the map), NOT raw event count.
+          // total = number of distinct stars; target ~6 stars per viewport screen.
+          const starCount = Math.max(total, 2);
+          const scrollableMapHeights = Math.max(3, Math.ceil(starCount / 6));
           const mapHeight = height * scrollableMapHeights; // total scrollable height = 3 viewport heights
           const scale = mapHeight / texture.height;
           const mapWidth = texture.width * scale;
@@ -264,8 +266,8 @@ export default function GameCanvas({
           scrollContainer.addChild(mapSprite);
 
           maxScrollYRef.current = Math.max(0, mapHeight - height);
-          // Start scrolled to show the middle third (path is visually in the middle)
-          scrollYRef.current = Math.max(0, Math.min(maxScrollYRef.current, mapHeight / 2 - height / 2));
+          // Start at the very bottom so user sees the start flag/task-1 area first.
+          scrollYRef.current = maxScrollYRef.current;
           scrollContainer.y = -scrollYRef.current;
 
           const mask = new Graphics();
@@ -480,6 +482,7 @@ export default function GameCanvas({
 
       // Draw checkpoints using star icon image
       let starIconTexture: any = null;
+      let chainTexture: any = null;
       try {
         // Load star icon image
         starIconTexture = await Assets.load('/star_icon.png');
@@ -487,14 +490,38 @@ export default function GameCanvas({
       } catch (error) {
         console.warn('Failed to load star_icon.png, using fallback rendering:', error);
       }
+      try {
+        chainTexture = await Assets.load('/chains.png');
+        if (!isRenderActive()) return;
+      } catch {
+        chainTexture = null;
+      }
 
       const starRadius = 40;
       const marginPx = 14;
+      const maxNodeIndex = Math.max(0, nodePoints.length - 1);
+      const n0 = nodePoints[0] ?? { x: 0.5, y: 0.9 };
+      const n1 = nodePoints[1] ?? { x: n0.x, y: Math.max(0, n0.y - 0.1) };
+      const nl = nodePoints[maxNodeIndex] ?? { x: 0.5, y: 0.1 };
+      const nlm1 = nodePoints[Math.max(0, maxNodeIndex - 1)] ?? { x: nl.x, y: Math.min(1, nl.y + 0.1) };
+      const startDx = n0.x - n1.x;
+      const startDy = n0.y - n1.y;
+      const endDx = nl.x - nlm1.x;
+      const endDy = nl.y - nlm1.y;
+      const startNorm = Math.max(0.0001, Math.hypot(startDx, startDy));
+      const endNorm = Math.max(0.0001, Math.hypot(endDx, endDy));
+      const startFlagPoint = {
+        x: Math.max(0.06, Math.min(0.94, n0.x + (startDx / startNorm) * 0.12)),
+        y: Math.max(0.02, Math.min(0.98, n0.y + (startDy / startNorm) * 0.12)),
+      };
+      const endFlagPoint = {
+        x: Math.max(0.06, Math.min(0.94, nl.x + (endDx / endNorm) * 0.12)),
+        y: Math.max(0.02, Math.min(0.98, nl.y + (endDy / endNorm) * 0.12)),
+      };
 
-      nodePoints.forEach((point, index) => {
+      const getPointPixel = (point: { x: number; y: number }) => {
         let cx: number, cy: number;
         let mapWidthForClamp: number, mapHeightForClamp: number;
-
         if (scrollContainerRef.current) {
           const mapImage = scrollContainerRef.current.children.find((child: any) => child instanceof Sprite) as Sprite | undefined;
           if (mapImage) {
@@ -516,11 +543,19 @@ export default function GameCanvas({
         }
         cx = Math.max(starRadius + marginPx, Math.min(mapWidthForClamp - starRadius - marginPx, cx));
         cy = Math.max(starRadius + marginPx, Math.min(mapHeightForClamp - starRadius - marginPx, cy));
+        return { x: cx, y: cy };
+      };
+
+      nodePoints.forEach((point, index) => {
+        const p = getPointPixel(point);
+        const cx = p.x;
+        const cy = p.y;
 
         const eventsAtStar = eventsPerStar?.[index] ?? (checklistItems[index] ? [checklistItems[index]] : []);
         const isStarCompleted = eventsAtStar.some((e: ChecklistItem) => e.isCompleted);
-        const isStarLocked = eventsAtStar.length > 0 && !isStarCompleted && eventsAtStar.every((e: ChecklistItem) => e.isLocked);
-        const isCompleted = index < completed;
+        const hasAvailable = eventsAtStar.some((e: ChecklistItem) => !e.isCompleted && !e.isLocked);
+        const isStarLocked = eventsAtStar.length > 0 && !isStarCompleted && !hasAvailable;
+        const isCompleted = isStarCompleted;
         const isCurrent = index === completed;
         const isLocked = isStarLocked || (eventsAtStar.length === 0 && index > completed);
 
@@ -593,9 +628,36 @@ export default function GameCanvas({
           checkpoint.addChild(checkpointGraphics);
         }
 
+        // Locked checkpoint visual: chain marker on top of star
+        if (isLocked && !isCompleted) {
+          if (chainTexture) {
+            const chain = new Sprite(chainTexture);
+            chain.anchor.set(0.5);
+            const maxChainSize = 26;
+            const chainTexSize = Math.max(chainTexture.width, chainTexture.height, 1);
+            chain.scale.set(maxChainSize / chainTexSize);
+            chain.position.set(0, 0);
+            checkpoint.addChild(chain);
+          } else {
+            const lockText = new Text({
+              text: '⛓',
+              style: new TextStyle({
+                fontSize: 18,
+                fill: '#f8fafc',
+                fontFamily: 'Arial',
+                fontWeight: 'bold',
+                dropShadow: true,
+              }),
+            });
+            lockText.anchor.set(0.5);
+            lockText.position.set(0, 0);
+            checkpoint.addChild(lockText);
+          }
+        }
+
         // Checkpoint title: only show when at least one event at this star is completed
         const completedEvent = eventsAtStar.find((e: ChecklistItem) => e.isCompleted);
-        const titleToShow = completedEvent?.title ?? (eventsAtStar.length === 1 ? eventsAtStar[0]?.title : null);
+        const titleToShow = completedEvent?.title ?? null;
         if (titleToShow) {
           const titleStyle = new TextStyle({
             fontSize: 11,
@@ -623,6 +685,51 @@ export default function GameCanvas({
           (checkpoint as any)._glowContainer = currentGlowContainer;
         }
       });
+
+      // Start/end flag markers (visual journey anchors)
+      const drawFlag = (pt: { x: number; y: number }, color: number, label: string, side: 'left' | 'right') => {
+        const pos = getPointPixel(pt);
+        const flag = new Container();
+        flag.position.set(pos.x, pos.y);
+        const marker = new Graphics();
+        marker.circle(0, 0, 5.5);
+        marker.fill({ color: 0xffffff, alpha: 0.95 });
+        marker.circle(0, 0, 4.1);
+        marker.fill({ color, alpha: 1 });
+        marker.stroke({ color: 0x111827, width: 1.1, alpha: 0.8 });
+        const pole = new Graphics();
+        const poleX = side === 'left' ? -14 : 14;
+        pole.roundRect(poleX - 2, -24, 4, 26, 2);
+        pole.fill(0x374151);
+        const cloth = new Graphics();
+        const clothStartX = side === 'left' ? poleX - 2 : poleX + 2;
+        const clothEndX = side === 'left' ? poleX - 18 : poleX + 18;
+        cloth.moveTo(clothStartX, -22);
+        cloth.lineTo(clothEndX, -16);
+        cloth.lineTo(clothStartX, -10);
+        cloth.closePath();
+        cloth.fill(color);
+        cloth.stroke({ color: 0xffffff, width: 1, alpha: 0.9 });
+        const base = new Graphics();
+        base.ellipse(0, 3, 11, 4);
+        base.fill({ color: 0x000000, alpha: 0.18 });
+        flag.addChild(base, marker, pole, cloth);
+        const text = new Text({
+          text: label,
+          style: new TextStyle({
+            fontSize: 9,
+            fill: '#ffffff',
+            fontFamily: 'Arial',
+            fontWeight: 'bold',
+          }),
+        });
+        text.anchor.set(0.5);
+        text.position.set(0, 12);
+        flag.addChild(text);
+        pathContainer.addChild(flag);
+      };
+      drawFlag(startFlagPoint, 0x22c55e, 'START', 'left');
+      drawFlag(endFlagPoint, 0xef4444, 'END', 'right');
 
       // Add path and checkpoints to scroll container if scrollable, otherwise to stage
       if (scrollContainerRef.current) {
@@ -1115,24 +1222,38 @@ export default function GameCanvas({
         doctor.addChild(doctorHint);
       }
 
-      const currentIdx = Math.max(0, Math.min(completed, nodePoints.length - 1));
-      const currentNode = nodePoints[currentIdx] || nodePoints[0];
+      const activeIdx = Math.max(0, Math.min(completed, nodePoints.length - 1));
+      const mapProgressNode = nodePoints[activeIdx] || nodePoints[0];
+      const startAnchorNode = startFlagPoint;
+      const progressIdx = Math.max(-1, Math.min(completed - 1, nodePoints.length - 1));
       const mapKey = `${imageUrl || 'no-image'}:${nodePoints.length}:${total}`;
       if (lastMapKeyRef.current !== mapKey) {
         lastMapKeyRef.current = mapKey;
-        lastCompletedRef.current = currentIdx;
+        lastCompletedRef.current = progressIdx;
       }
-      const previousCompleted = Math.max(0, Math.min(lastCompletedRef.current, nodePoints.length - 1));
-      const shouldPlayWalk = currentIdx > previousCompleted;
-      const prevNode = nodePoints[previousCompleted] || currentNode;
-      lastCompletedRef.current = currentIdx;
+      const previousProgress = Math.max(-1, Math.min(lastCompletedRef.current, nodePoints.length - 1));
+      const shouldPlayWalk = progressIdx > previousProgress;
+      const prevNode = previousProgress >= 0 ? nodePoints[previousProgress] : startAnchorNode;
+      const currentNode = progressIdx >= 0 ? nodePoints[progressIdx] : startAnchorNode;
+      lastCompletedRef.current = progressIdx;
 
       const clamp = (v: number, min: number, max: number) => Math.max(min, Math.min(max, v));
       const safeMargin = 12;
-      const clampFootPoint = (px: number, py: number, charW: number, charH: number) => ({
-        x: clamp(px, safeMargin + charW / 2, width - safeMargin - charW / 2),
-        y: clamp(py, safeMargin + charH, height - safeMargin),
-      });
+      const clampFootPoint = (px: number, py: number, charW: number, charH: number) => {
+        let maxH = height;
+        if (scrollContainerRef.current) {
+          const mapImage = scrollContainerRef.current.children.find(
+            (child: any) => child instanceof Sprite
+          ) as Sprite | undefined;
+          if (mapImage) {
+            maxH = mapImage.height;
+          }
+        }
+        return {
+          x: clamp(px, safeMargin + charW / 2, width - safeMargin - charW / 2),
+          y: clamp(py, safeMargin + charH, maxH - safeMargin),
+        };
+      };
 
       // Pick the best side around a node so full character remains visible.
       const getPlayerFootForNode = (node: { x: number; y: number }) => {
@@ -1148,7 +1269,6 @@ export default function GameCanvas({
             // Map sprite is centered: mapImage.x offsets content; y=0 is top of map
             cx = mapImage.x + node.x * mapWidth;
             cy = node.y * mapHeight;
-            cy += scrollContainerRef.current.y;
           } else {
             // Fallback
             cx = node.x * width;
@@ -1246,8 +1366,9 @@ export default function GameCanvas({
       app.ticker.add(() => {
         if (!isRenderActive()) return;
         tick += 0.03;
-        const liveCurrent = nodePoints[Math.max(0, Math.min(completed, nodePoints.length - 1))];
-        const livePos = getPlayerFootForNode(liveCurrent || { x: 0.1, y: 0.8 });
+        const liveProgressIdx = Math.max(-1, Math.min(completed - 1, nodePoints.length - 1));
+        const liveCurrent = liveProgressIdx >= 0 ? nodePoints[liveProgressIdx] : startAnchorNode;
+        const livePos = getPlayerFootForNode(liveCurrent || mapProgressNode || { x: 0.1, y: 0.8 });
         targetX = livePos.x;
         targetY = livePos.y;
 

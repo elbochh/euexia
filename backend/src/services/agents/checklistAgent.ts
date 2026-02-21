@@ -23,7 +23,9 @@ export interface ChecklistEventData {
   xpReward: number;
   coinReward: number;
   unlockAt: string;     // ISO date-time, e.g. "2025-02-20T00:00:00.000Z" for day 1 00:00, 19:00 for night
-  groupId: string;     // same groupId = same star on map
+  groupId: string;     // legacy alias for sequenceId
+  sequenceId: string;  // dependency chain id (event N requires N-1 in same sequenceId)
+  starGroupId: string; // same starGroupId = same star on map
   orderInGroup: number; // 0, 1, 2, ... event N unlocks when previous in group is completed
 }
 
@@ -385,11 +387,12 @@ RULES:
 2. Events that can be done the same day without order = same groupId, same or different orderInGroup.
 3. unlockAt = exact date-time in ISO 8601 (e.g. "2025-02-20T00:00:00.000Z"). Day 1 = first day from now, Day 2 = next day, etc.
 4. Time of day: "morning" → 08:00, "afternoon" → 14:00, "evening" → 18:00, "night" → 19:00. Default 00:00 if not specified.
-5. groupId: string to group events under the same star (e.g. "med1" for medicine 1, "day1" for day-1 tasks). Same day, same star = same groupId.
-6. orderInGroup: 0, 1, 2, ... For sequential unlock (e.g. daily medicine): event N unlocks only when event N-1 is completed.
-7. title: SHORT (e.g. "Take Amoxicillin", "Check blood pressure"). description: practical advice with dose/timing.
-8. Return ONLY a valid JSON array — no markdown, no explanation.
-
+5. sequenceId: string to represent a routine chain (e.g. "tylenol-night"). Events with same sequenceId are sequential by orderInGroup.
+6. starGroupId: string to group events under the same star on map. SAME DAY events should usually share the same starGroupId.
+7. orderInGroup: 0, 1, 2, ... For sequential unlock inside sequenceId (event N unlocks only when event N-1 is completed).
+8. Include progress marker in title for recurring chains, e.g. "Drink water (1/3)", "Drink water (2/3)".
+9. title: SHORT (e.g. "Take Amoxicillin", "Check blood pressure"). description: practical advice with dose/timing.
+10. Return ONLY a valid JSON array — no markdown, no explanation.
 Reference "now" for relative dates: ${nowIso}
 
 JSON schema per event:
@@ -400,15 +403,17 @@ JSON schema per event:
   "xpReward": 5-30,
   "coinReward": 3-15,
   "unlockAt": "ISO 8601 date-time string",
-  "groupId": "string (same = same star)",
+  "groupId": "string (legacy alias, set same as sequenceId)",
+  "sequenceId": "string (dependency chain id)",
+  "starGroupId": "string (same star on map, typically same day bucket)",
   "orderInGroup": 0-based index within group
 }
 
 Example (daily medicine for 3 days, morning):
 [
-  {"title":"Take Amoxicillin","description":"Take 500mg with breakfast.","category":"medication","xpReward":25,"coinReward":12,"unlockAt":"2025-02-20T08:00:00.000Z","groupId":"amox","orderInGroup":0},
-  {"title":"Take Amoxicillin","description":"Take 500mg with breakfast.","category":"medication","xpReward":25,"coinReward":12,"unlockAt":"2025-02-21T08:00:00.000Z","groupId":"amox","orderInGroup":1},
-  {"title":"Take Amoxicillin","description":"Take 500mg with breakfast.","category":"medication","xpReward":25,"coinReward":12,"unlockAt":"2025-02-22T08:00:00.000Z","groupId":"amox","orderInGroup":2}
+  {"title":"Take Amoxicillin (1/3)","description":"Take 500mg with breakfast.","category":"medication","xpReward":25,"coinReward":12,"unlockAt":"2025-02-20T08:00:00.000Z","groupId":"amox","sequenceId":"amox","starGroupId":"2025-02-20","orderInGroup":0},
+  {"title":"Take Amoxicillin (2/3)","description":"Take 500mg with breakfast.","category":"medication","xpReward":25,"coinReward":12,"unlockAt":"2025-02-21T08:00:00.000Z","groupId":"amox","sequenceId":"amox","starGroupId":"2025-02-21","orderInGroup":1},
+  {"title":"Take Amoxicillin (3/3)","description":"Take 500mg with breakfast.","category":"medication","xpReward":25,"coinReward":12,"unlockAt":"2025-02-22T08:00:00.000Z","groupId":"amox","sequenceId":"amox","starGroupId":"2025-02-22","orderInGroup":2}
 ]
 
 Care plan:
@@ -419,7 +424,7 @@ JSON array:`;
 
 function validateAndNormalizeEvents(raw: any[], now: Date): ChecklistEventData[] {
   const validCategories = ['medication', 'nutrition', 'exercise', 'monitoring', 'appointment', 'test', 'lifestyle', 'general'];
-  return raw
+  const normalized = raw
     .filter((item: any) => item && typeof item === 'object' && item.title)
     .map((item: any, index: number) => {
       let unlockAt = item.unlockAt;
@@ -429,7 +434,10 @@ function validateAndNormalizeEvents(raw: any[], now: Date): ChecklistEventData[]
         d.setHours(0, 0, 0, 0);
         unlockAt = d.toISOString();
       }
-      const groupId = String(item.groupId ?? `g${index}`);
+      const sequenceId = String(item.sequenceId ?? item.groupId ?? `seq-${index}`);
+      const dateKey = new Date(unlockAt).toISOString().slice(0, 10);
+      const starGroupId = String(item.starGroupId ?? dateKey);
+      const groupId = String(item.groupId ?? sequenceId);
       const orderInGroup = typeof item.orderInGroup === 'number' ? Math.max(0, item.orderInGroup) : 0;
       return {
         title: cleanTitle(String(item.title)),
@@ -439,9 +447,25 @@ function validateAndNormalizeEvents(raw: any[], now: Date): ChecklistEventData[]
         coinReward: typeof item.coinReward === 'number' ? Math.min(15, Math.max(3, item.coinReward)) : 5,
         unlockAt,
         groupId,
+        sequenceId,
+        starGroupId,
         orderInGroup,
       };
     });
+
+  const totalsBySequence = new Map<string, number>();
+  normalized.forEach((e) => {
+    totalsBySequence.set(e.sequenceId, (totalsBySequence.get(e.sequenceId) || 0) + 1);
+  });
+
+  return normalized.map((e) => {
+    const total = totalsBySequence.get(e.sequenceId) || 1;
+    const hasProgressSuffix = /\(\d+\/\d+\)$/.test(e.title.trim());
+    if (total > 1 && !hasProgressSuffix) {
+      return { ...e, title: `${e.title} (${e.orderInGroup + 1}/${total})` };
+    }
+    return e;
+  });
 }
 
 /**
@@ -486,6 +510,8 @@ export async function structureChecklistAsEvents(paragraph: string): Promise<Che
         coinReward: item.coinReward,
         unlockAt: unlock.toISOString(),
         groupId: `g${i}`,
+        sequenceId: `g${i}`,
+        starGroupId: unlock.toISOString().slice(0, 10),
         orderInGroup: j,
       });
     }
@@ -499,6 +525,8 @@ export async function structureChecklistAsEvents(paragraph: string): Promise<Che
     coinReward: 5,
     unlockAt: now.toISOString(),
     groupId: 'g0',
+    sequenceId: 'g0',
+    starGroupId: now.toISOString().slice(0, 10),
     orderInGroup: 0,
   }];
 }

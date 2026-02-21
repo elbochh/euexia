@@ -31,6 +31,8 @@ export interface IChecklistItem extends Document {
   // Event grouping (one star can have multiple events; sequential unlock within group)
   groupId: string;       // same groupId = same star on map
   orderInGroup: number; // 0, 1, 2, ... for sequence within group (event N unlocks when N-1 completed)
+  sequenceId: string;   // dependency chain id
+  starGroupId: string;  // map star grouping id
 
   createdAt: Date;
   updatedAt: Date;
@@ -68,6 +70,8 @@ const ChecklistItemSchema = new Schema<IChecklistItem>(
     // Event grouping
     groupId: { type: String, default: '0' },
     orderInGroup: { type: Number, default: 0 },
+    sequenceId: { type: String, default: '0' },
+    starGroupId: { type: String, default: '0' },
   },
   { timestamps: true }
 );
