@@ -11,15 +11,18 @@ import { indexChatMessageChunk } from '../services/rag/indexer';
 // ---------------------------------------------------------------------------
 function buildSystemPrompt(contextString: string): string {
     return [
-      'You are Euexia Doctor Assistant — a concise, supportive medical follow-up chatbot.',
+      'You are Euexia Doctor Assistant — a helpful, knowledgeable medical follow-up chatbot.',
       '',
-      'RULES:',
-      '• For patient-specific questions (medications, diagnoses, appointments): Use ONLY the patient context below. Never invent patient-specific medications, doses, or diagnoses.',
-      '• For general health questions (nutrition, exercise, wellness): You may provide evidence-based general advice, but prioritize any relevant information from the patient context if available.',
-      '• Give concrete, specific advice (food names, exercise types, exact actions).',
-      '• Max 5 bullet points OR 1 short paragraph. Max ~100 words.',
-      '• Never repeat a sentence you already wrote.',
-      '• If patient-specific info is missing, provide general guidance and suggest consulting their doctor for personalized advice.',
+      'RULES (follow strictly):',
+      '1. You MUST ALWAYS provide a helpful answer. NEVER refuse or say "I cannot help" or "no information available".',
+      '2. For patient-specific questions (medications, diagnoses, appointments): use the patient context below. Never invent patient-specific medications, doses, or diagnoses.',
+      '3. For general health questions (nutrition, exercise, wellness, meals, recipes): provide evidence-based general advice. Prioritize patient context if relevant, but ALWAYS answer even without it.',
+      '4. Give concrete, specific advice — include food names, exercise types, exact actions, quantities.',
+      '5. Use bullet points for lists. Keep answers complete but focused (no filler).',
+      '6. Never repeat the same sentence or point twice.',
+      '7. If patient-specific info is missing for a specific question, provide helpful general guidance and briefly note they should consult their doctor for personalized details.',
+      '8. CONVERSATION CONTINUITY: When the patient refers to something from the recent conversation (e.g., "these meals", "that medication", "those exercises"), refer back to what was specifically discussed. Do NOT change topic or ignore the reference.',
+      '9. Answer ONLY the question asked. Do not add unrelated information about medications when asked about food, or vice versa.',
       '',
       contextString,
     ].join('\n');
@@ -110,15 +113,25 @@ export const sendChatMessage = async (
     console.log(
       `[RAG] Retrieved context: ~${context.tokenEstimate} tokens, ${context.topChunkIds.length} chunks`
     );
+    // Log first 200 chars of context for debugging
+    console.log(`[RAG] Context preview: ${context.contextString.substring(0, 200)}...`);
 
     // ================================================================
-    // STEP 3 — Generate answer via MedGemma
+    // STEP 3 — Generate answer via MedGemma (with conversation history)
     // ================================================================
+    // Build compact conversation history for the generation prompt.
+    // Exclude the current user message (it's the userMessage param).
+    // Include both user and assistant messages for continuity.
+    const conversationHistory = historyTurns
+      .slice(0, -1) // exclude the current message (already in standaloneQuestion)
+      .slice(-4);    // last 2 exchanges (4 messages: user+assistant+user+assistant)
+
     let ai;
     try {
       ai = await generateChatResponse({
         systemPrompt: buildSystemPrompt(context.contextString),
         userMessage: standaloneQuestion,
+        conversationHistory,
       });
     } catch (err: any) {
       const msg = String(err?.message || '');
@@ -126,7 +139,7 @@ export const sendChatMessage = async (
         msg.includes('4096 tokens') || msg.includes('Input validation error');
       if (!isTokenError) throw err;
 
-      // Retry with minimal context
+      // Retry with minimal context and no history (save tokens)
       console.warn('[RAG] Token limit hit, retrying with minimal context');
       const minimalContext = context.contextString.slice(0, 2000);
       ai = await generateChatResponse({
