@@ -21,7 +21,6 @@ export default function DashboardPage() {
     progress,
     checklist,
     mapSpec,
-    mapImageUrl,
     currentMapInfo,
     consultations,
     completeItem,
@@ -181,7 +180,6 @@ export default function DashboardPage() {
             completedCount={completedCount}
             totalCount={Math.max(totalCount, mapEventsPerStar.length)}
             mapSpec={mapSpec}
-            mapImageUrl={mapImageUrl}
             checklistItems={mapChecklist}
             eventsPerStar={mapEventsPerStar}
             onCheckpointClick={handleCheckpointClick}

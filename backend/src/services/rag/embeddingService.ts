@@ -1,4 +1,5 @@
-import { pipeline } from '@xenova/transformers';
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const { pipeline } = require('@xenova/transformers');
 
 let embedderPromise: Promise<any> | null = null;
 

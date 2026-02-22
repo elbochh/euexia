@@ -3,7 +3,6 @@ import { AuthRequest } from '../middleware/auth';
 import { Consultation } from '../models/Consultation';
 import { ChecklistItem } from '../models/ChecklistItem';
 import { Map as MapModel } from '../models/Map';
-import { MapThemeTemplate } from '../models/MapThemeTemplate';
 import { processVoice } from '../services/agents/voiceAgent';
 import { processImage } from '../services/agents/imageAgent';
 import { processText } from '../services/agents/textAgent';
@@ -15,13 +14,7 @@ import {
   deriveChecklistSignals,
 } from '../services/mapSpec/generator';
 import {
-  analyzeChecklistTheme,
   detectThemeWithOpenAI,
-  generateMapImage,
-  getFallbackMapImage,
-  buildMapSpecFromAnalysis,
-  generateScrollableMapCheckpoints,
-  PROMPT_VERSION,
 } from '../services/mapImageGenerator';
 import { indexConsultationContext } from '../services/rag/indexer';
 import fs from 'fs';
@@ -206,126 +199,28 @@ export const createConsultation = async (req: AuthRequest, res: Response): Promi
     }
     const checklistItemsData = groupOrder.map((g) => groupToFirstItem.get(g)!);
 
-    console.log(`\n=== THEME DETECTION ===`);
-    console.log(`Raw consultation context for theme detection:`);
-    console.log(checklistParagraph);
-    console.log(`\nGroup-level data for map (${checklistItemsData.length} stars):`);
-    console.log(JSON.stringify(checklistItemsData, null, 2));
-    console.log(`\nDetected theme:`);
-    console.log(JSON.stringify(consultationTheme, null, 2));
-    console.log(`Theme Key: ${consultationTheme.themeKey}`);
-    console.log(`Specialty: ${consultationTheme.specialty}`);
-    console.log(`Theme Keywords: ${consultationTheme.themeKeywords.join(', ')}`);
-    console.log(`Specific Elements: ${consultationTheme.specificElements.join(', ')}`);
-    console.log(`========================\n`);
-
-    // Generate a SINGLE tall vertical scrollable map: one checkpoint (star) per group
+    // Generate map spec algorithmically — no AI image generation needed.
+    // The frontend renders the map using Kenney hex tiles procedurally.
     const allItems = checklistItemsData;
     const signals = deriveChecklistSignals(allItems);
-    const themeProfile = consultationTheme || analyzeChecklistTheme(allItems);
-    const totalStepCount = allItems.length; // number of stars (groups)
+    const totalStepCount = allItems.length;
 
-    // Check for existing template (reuse if available)
-    const existingTemplate = await MapThemeTemplate.findOne({
-      themeKey: themeProfile.themeKey,
-      stepCount: totalStepCount,
-      promptVersion: PROMPT_VERSION,
-    }).lean();
+    console.log(`Generating map spec for ${totalStepCount} stars (hex tile map, no image needed)`);
 
-    let mapSpec: any;
-    let mapImageUrl: string;
-    let mapImagePath: string;
-    let source: 'ai' | 'fallback' = 'ai';
-    let validation: { ok: boolean; warnings: string[] } = { ok: true, warnings: [] };
-
-    if (existingTemplate) {
-      // Reuse existing template
-      await MapThemeTemplate.updateOne(
-        { _id: existingTemplate._id },
-        { $inc: { usageCount: 1 }, $set: { lastUsedAt: new Date() } }
-      );
-      mapSpec = existingTemplate.mapSpec;
-      mapImageUrl = existingTemplate.mapImageUrl;
-      mapImagePath = existingTemplate.mapImagePath || '';
-      validation.warnings.push(`Reused cached template for theme "${themeProfile.specialty}" (${totalStepCount} steps).`);
-    } else {
-      // STEP 1: Generate single tall vertical map image with ALL checkpoints
-      console.log(`\n=== GENERATING SINGLE SCROLLABLE MAP ===`);
-      console.log(`Theme: ${themeProfile.specialty} (key: ${themeProfile.themeKey})`);
-      console.log(`Total Steps: ${totalStepCount}`);
-      console.log(`Theme Keywords: ${themeProfile.themeKeywords.join(', ')}`);
-      console.log(`Specific Elements: ${themeProfile.specificElements.join(', ')}`);
-      console.log(`==============================\n`);
-      
-      const imageResult = await generateMapImage(signals, allItems, {
-        consultationId: consultation._id.toString(),
-        mapIndex: 0,
-        themeKey: themeProfile.themeKey,
-        stepCount: totalStepCount, // All checkpoints in one map
-        themeProfile,
-        rawContext: checklistParagraph,
-        isScrollableMap: true, // Flag to indicate this is a scrollable map
-      });
-
-      if (!imageResult || !imageResult.imageBuffer) {
-        console.error('Failed to generate map image, using fallback');
-        const fallbackImage = getFallbackMapImage();
-        const fallbackResult = await generateMapSpecForChecklist(allItems, 0, totalStepCount);
-        mapSpec = fallbackResult.mapSpec;
-        mapImageUrl = fallbackImage.imageUrl;
-        mapImagePath = fallbackImage.imagePath;
-        source = 'fallback';
-        validation.warnings.push('AI image generation failed; fallback used.');
-      } else {
-        // STEP 2: Generate checkpoint positions algorithmically (no image analysis)
-        console.log(`Generating checkpoint positions algorithmically for ${totalStepCount} checkpoints...`);
-        const checkpointData = generateScrollableMapCheckpoints(totalStepCount, allItems);
-        
-        // STEP 3: Build mapSpec from algorithmically generated checkpoints
-        mapSpec = buildMapSpecFromAnalysis(
-          checkpointData.path,
-          checkpointData.nodes,
-          signals,
-          allItems,
-          imageResult.imageUrl,
-          themeProfile
-        );
-        mapImageUrl = imageResult.imageUrl;
-        mapImagePath = imageResult.imagePath || '';
-
-        // Store as reusable template
-        try {
-          await MapThemeTemplate.create({
-            themeKey: themeProfile.themeKey,
-            specialty: themeProfile.specialty,
-            stepCount: totalStepCount,
-            mapSpec,
-            mapImageUrl: imageResult.imageUrl,
-            mapImagePath: imageResult.imagePath || '',
-            themeProfile,
-            promptVersion: PROMPT_VERSION,
-            usageCount: 1,
-            lastUsedAt: new Date(),
-          });
-        } catch (templateError) {
-          // Safe to continue if another request creates same template concurrently
-          console.warn('Template create skipped:', templateError);
-        }
-      }
-    }
+    const { mapSpec } = await generateMapSpecForChecklist(allItems, 0, totalStepCount);
 
     // Save single scrollable map to database
     const savedMap = await MapModel.create({
       consultationId: consultation._id,
       userId,
-      mapIndex: 0, // Only one map now
+      mapIndex: 0,
       startStepIndex: 0,
       endStepIndex: totalStepCount - 1,
       mapSpec,
-      source,
-      validationWarnings: validation.warnings,
-      mapImageUrl,
-      mapImagePath,
+      source: 'ai',
+      validationWarnings: [],
+      mapImageUrl: null,
+      mapImagePath: null,
     });
 
     console.log(`Generated single scrollable map with ${totalStepCount} checkpoints for consultation ${consultation._id}`);
