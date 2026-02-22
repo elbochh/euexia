@@ -175,6 +175,8 @@ export const createConsultation = async (req: AuthRequest, res: Response): Promi
         timeOfDay: 'any',
         isFullyDone: false,
         groupId: event.groupId,
+        sequenceId: event.sequenceId,
+        starGroupId: event.starGroupId,
         orderInGroup: event.orderInGroup,
       }))
     );
@@ -188,11 +190,11 @@ export const createConsultation = async (req: AuthRequest, res: Response): Promi
       console.warn('[RAG] Failed to index consultation context:', err)
     );
 
-    // Build group-level data for map: one star per unique groupId (first event in group = label)
+    // Build group-level data for map: one star per unique starGroupId (typically per day)
     const groupOrder: string[] = [];
     const groupToFirstItem = new Map<string, { category: string; title: string; description: string }>();
     for (const item of checklistItems) {
-      const g = String(item.groupId);
+      const g = String((item as any).starGroupId || item.groupId);
       if (!groupToFirstItem.has(g)) {
         groupOrder.push(g);
         groupToFirstItem.set(g, {

@@ -37,6 +37,8 @@ interface ChecklistItem {
   category: string;
   order: number;
   groupId?: string;
+  sequenceId?: string;
+  starGroupId?: string;
   orderInGroup?: number;
   // Timing fields (computed by backend)
   unlockAt: string | null;

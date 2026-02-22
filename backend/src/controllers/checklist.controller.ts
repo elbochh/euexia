@@ -78,13 +78,13 @@ export const completeItem = async (req: AuthRequest, res: Response): Promise<voi
     }
 
     // Event grouping: event N unlocks only when previous event in same group is completed
-    const groupId = item.groupId ?? '';
+    const groupId = (item as any).sequenceId ?? item.groupId ?? '';
     const orderInGroup = item.orderInGroup ?? 0;
     if (groupId && orderInGroup > 0) {
       const prevInGroup = await ChecklistItem.findOne({
         userId: req.userId,
         consultationId: item.consultationId,
-        groupId,
+        $or: [{ sequenceId: groupId }, { groupId }],
         orderInGroup: orderInGroup - 1,
       }).lean();
       if (prevInGroup && !prevInGroup.isCompleted && !prevInGroup.isFullyDone) {
@@ -214,13 +214,14 @@ function addTimingInfo(item: any, allItemsInConsultation?: any[]): any {
 
   // Event grouping: locked if previous event in same group (same consultation) is not completed
   let isLockedByGroup = false;
-  if (allItemsInConsultation && item.groupId != null && (item.orderInGroup ?? 0) > 0) {
+  const seqId = (item as any).sequenceId ?? item.groupId;
+  if (allItemsInConsultation && seqId != null && (item.orderInGroup ?? 0) > 0) {
     const sameConsultation = allItemsInConsultation.filter(
       (i: any) => String(i.consultationId) === String(item.consultationId)
     );
     const prev = sameConsultation.find(
       (i: any) =>
-        String(i.groupId) === String(item.groupId) &&
+        String((i as any).sequenceId ?? i.groupId) === String(seqId) &&
         (i.orderInGroup ?? 0) === (item.orderInGroup ?? 0) - 1
     );
     if (prev && !prev.isCompleted && !prev.isFullyDone) {

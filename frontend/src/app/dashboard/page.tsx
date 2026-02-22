@@ -85,16 +85,16 @@ export default function DashboardPage() {
     ? checklist.filter((i) => i.consultationId === currentConsultationId)
     : checklist;
 
-  // Group events by star: groupOrder = unique groupIds in order of first occurrence; one star per group
+  // Group events by star: starGroupId is map grouping (typically day-level)
   const groupOrder: string[] = [];
   const sortedByOrder = [...currentChecklist].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
   for (const item of sortedByOrder) {
-    const g = String(item.groupId ?? item._id ?? '');
+    const g = String(item.starGroupId ?? item.groupId ?? item._id ?? '');
     if (!groupOrder.includes(g)) groupOrder.push(g);
   }
   // Events per star (all stars for this consultation)
   const eventsPerStarAll: typeof currentChecklist[] = groupOrder.map((g) =>
-    currentChecklist.filter((e) => String(e.groupId ?? e._id ?? '') === g)
+    currentChecklist.filter((e) => String(e.starGroupId ?? e.groupId ?? e._id ?? '') === g)
   );
 
   // Current map shows stars [startStepIndex, endStepIndex]
@@ -154,9 +154,14 @@ export default function DashboardPage() {
   };
 
   // Selected star's events (for overlay: list of events at this star)
-  const selectedStarEvents = selectedCheckpoint !== null
+  const selectedStarEventsRaw = selectedCheckpoint !== null
     ? (mapEventsPerStar[selectedCheckpoint] ?? [])
     : [];
+  const selectedHasAvailable = selectedStarEventsRaw.some((e) => !e.isCompleted && !e.isLocked && !e.isExpired);
+  // Unlocked star: show only completable tasks. Locked star: show only not-completable tasks.
+  const selectedStarEvents = selectedHasAvailable
+    ? selectedStarEventsRaw.filter((e) => !e.isCompleted && !e.isLocked && !e.isExpired)
+    : selectedStarEventsRaw.filter((e) => !e.isCompleted && (e.isLocked || e.isExpired));
 
   return (
     <div className="h-screen pb-20 pt-14 flex flex-col overflow-hidden">
