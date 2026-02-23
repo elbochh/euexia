@@ -262,6 +262,142 @@ function validateAndNormalize(items: any[]): ChecklistItemData[] {
     }));
 }
 
+/**
+ * Count medications mentioned in source paragraph.
+ * Looks for medication names and dose patterns.
+ */
+function countMedicationsInSource(paragraph: string): number {
+  if (!paragraph || paragraph.length < 10) return 0;
+  
+  // Common medication names from discharge summaries
+  const medicationNames = [
+    'bisoprolol', 'alendronic', 'adcal', 'omeprazole', 'glyceryl', 'trinitrate',
+    'warfarin', 'folic', 'ramipril', 'simvastatin', 'gliclazide', 'amoxicillin',
+    'ibuprofen', 'metformin', 'aspirin', 'atorvastatin', 'lisinopril', 'amlodipine',
+    'alendronate', 'calcium', 'vitamin d', 'adcal-d3', 'gtn', 'nitroglycerin',
+  ];
+  
+  // Count unique medication mentions
+  const found = new Set<string>();
+  const lowerParagraph = paragraph.toLowerCase();
+  
+  medicationNames.forEach(med => {
+    if (lowerParagraph.includes(med)) {
+      found.add(med);
+    }
+  });
+  
+  // Also count dose patterns that suggest medications
+  const dosePatterns = paragraph.match(/\b\d+\s*(mg|mcg|micrograms?|tablets?|capsules?)\b/gi) || [];
+  const uniqueDoses = new Set(dosePatterns.map(d => d.toLowerCase()));
+  
+  // Return the higher count (either by name or by dose pattern)
+  return Math.max(found.size, Math.floor(uniqueDoses.size / 2));
+}
+
+/**
+ * Validate checklist completeness against source paragraph.
+ * Detects missing medications and other issues.
+ */
+export function validateChecklistCompleteness(
+  items: ChecklistItemData[],
+  sourceParagraph: string
+): { missing: string[]; warnings: string[]; suggestions: string[] } {
+  const warnings: string[] = [];
+  const suggestions: string[] = [];
+  const missing: string[] = [];
+  
+  const medicationItems = items.filter(i => i.category === 'medication');
+  const sourceMedCount = countMedicationsInSource(sourceParagraph);
+  
+  // Check medication count
+  if (sourceMedCount > 0 && medicationItems.length < sourceMedCount) {
+    const diff = sourceMedCount - medicationItems.length;
+    warnings.push(
+      `Source contains ~${sourceMedCount} medications but only ${medicationItems.length} medication items generated. ` +
+      `Missing approximately ${diff} medication(s).`
+    );
+  }
+  
+  // Check for specific common medications that should be present
+  // Expanded list for discharge summaries
+  const expectedMeds = [
+    'bisoprolol', 'alendronic', 'adcal', 'omeprazole', 'glyceryl', 'trinitrate',
+    'warfarin', 'folic', 'ramipril', 'simvastatin', 'gliclazide'
+  ];
+  const foundMeds = medicationItems.map(i => i.title.toLowerCase());
+  const sourceLower = sourceParagraph.toLowerCase();
+  
+  expectedMeds.forEach(med => {
+    // Check if medication is mentioned in source
+    const inSource = sourceLower.includes(med);
+    // Check if it's found in generated items (check both title and description)
+    const found = foundMeds.some(f => f.includes(med)) ||
+                  medicationItems.some(i => i.description.toLowerCase().includes(med));
+    
+    if (inSource && !found) {
+      missing.push(med);
+    }
+  });
+  
+  // Special check for Simvastatin (common miss)
+  if (sourceLower.includes('simvastatin') && 
+      !foundMeds.some(f => f.includes('simvastatin')) &&
+      !medicationItems.some(i => i.description.toLowerCase().includes('simvastatin'))) {
+    if (!missing.includes('simvastatin')) {
+      missing.push('simvastatin');
+    }
+  }
+  
+  // Check for appointments
+  const hasAppointments = /(appointment|follow-up|schedule|visit|6 weeks|8 weeks)/i.test(sourceParagraph);
+  const appointmentItems = items.filter(i => i.category === 'appointment');
+  if (hasAppointments && appointmentItems.length === 0) {
+    warnings.push('Source mentions appointments but no appointment items generated');
+  }
+  
+  // Check for tests
+  const hasTests = /(test|lab|FBC|INR|colonoscopy|blood test)/i.test(sourceParagraph);
+  const testItems = items.filter(i => i.category === 'test');
+  if (hasTests && testItems.length === 0) {
+    warnings.push('Source mentions tests but no test items generated');
+  }
+  
+  // Check medication quality
+  if (medicationItems.length > 0) {
+    const itemsWithDosage = medicationItems.filter(i => 
+      /\d+\s*(mg|mcg|micrograms?|tablets?|capsules?)/i.test(i.description)
+    ).length;
+    
+    if (itemsWithDosage / medicationItems.length < 0.6) {
+      suggestions.push('Consider adding dosage information to medication items');
+    }
+    
+    const itemsWithTiming = medicationItems.filter(i => 
+      /(morning|evening|before|after|meal|breakfast|dinner|night|daily)/i.test(i.description)
+    ).length;
+    
+    if (itemsWithTiming / medicationItems.length < 0.5) {
+      suggestions.push('Consider adding timing instructions (morning/evening, before/after meals) to medication items');
+    }
+  }
+  
+  // Check for duplicates
+  const titles = items.map(i => i.title.toLowerCase());
+  const duplicates = titles.filter((t, i) => titles.indexOf(t) !== i);
+  if (duplicates.length > 0) {
+    warnings.push(`Duplicate titles detected: ${[...new Set(duplicates)].join(', ')}`);
+  }
+  
+  // Check title length
+  const longTitles = items.filter(i => i.title.length > 50);
+  if (longTitles.length > 0) {
+    warnings.push(`${longTitles.length} items have titles >50 chars (should be <35)`);
+  }
+  
+  return { missing, warnings, suggestions };
+}
+
 /* ------------------------------------------------------------------ */
 /*  Rule-based fallback: split paragraph into items manually           */
 /* ------------------------------------------------------------------ */

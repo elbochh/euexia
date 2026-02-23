@@ -19,12 +19,31 @@ Below are multiple summaries extracted from different sources of the same patien
 YOUR JOB: Merge all summaries into ONE comprehensive, highly specific care plan paragraph.
 
 CRITICAL RULES — follow them strictly:
-1. PRESERVE every specific detail: drug names, exact dosages (mg, mL), exact timing ("every 8 hours", "twice daily with meals"), exact dates ("return on March 3rd"), exact lab values ("HbA1c 7.2%").
-2. NEVER generalise. Replace nothing with vague language.
-3. If two summaries mention the same medication but with different details, include BOTH and note the discrepancy.
-4. Include WHEN each action should start relative to now (e.g., "starting today", "starting in 3 days", "after 1 week").
-5. Include HOW LONG each action should continue (e.g., "for 7 days", "for 2 weeks", "ongoing/indefinite").
-6. Include SPECIFIC WARNING SIGNS that require immediate medical attention (e.g., "fever above 101°F", "blood in stool", "difficulty breathing").
+
+1. MEDICATION PRESERVATION (HIGHEST PRIORITY):
+   - If the source contains a MEDICATION TABLE or LIST, you MUST include EVERY medication from that table.
+   - Do NOT summarize medications into categories like "multiple heart medications" or "various medications".
+   - List each medication separately with its exact details.
+   - Count medications in the source. If you see 10 medications, your output must mention all 10 separately.
+   - IMPORTANT: Medications at the END of lists are often missed. Check the LAST medications in any table or list.
+   - Common medications to watch for: Bisoprolol, Alendronic Acid, Adcal-D3, Omeprazole, Glyceryl Trinitrate, 
+     Warfarin, Folic Acid, Ramipril, Simvastatin, Gliclazide. If ANY of these appear in the source, include them.
+   - Example: If source has "Bisoprolol 2.5mg once daily", "Omeprazole 40mg once daily", "Ramipril 7.5mg once daily", 
+     "Simvastatin 40mg every night", you MUST include all four separately, NOT "multiple medications for heart and stomach".
+
+2. PRESERVE every specific detail: drug names, exact dosages (mg, mL, tablets), exact timing ("every 8 hours", "twice daily with meals", "every night"), exact dates ("return on March 3rd"), exact lab values ("HbA1c 7.2%").
+
+3. NEVER generalise. Replace nothing with vague language.
+
+4. If two summaries mention the same medication but with different details, include BOTH and note the discrepancy.
+
+5. Include WHEN each action should start relative to now (e.g., "starting today", "starting in 3 days", "after 1 week").
+
+6. Include HOW LONG each action should continue (e.g., "for 7 days", "for 2 weeks", "ongoing/indefinite").
+
+7. Include SPECIFIC WARNING SIGNS that require immediate medical attention (e.g., "fever above 101°F", "blood in stool", "difficulty breathing").
+
+8. APPOINTMENT PRESERVATION: If multiple follow-up appointments are mentioned, list ALL of them separately with exact timeframes and doctor names.
 
 STRUCTURE the paragraph covering ALL of these sections (skip sections with no data):
 • MEDICATIONS: exact name, dose, route, frequency, duration, special instructions (with food? empty stomach?)

@@ -8,7 +8,7 @@ import { processImage } from '../services/agents/imageAgent';
 import { processText } from '../services/agents/textAgent';
 import { processPdf } from '../services/agents/pdfAgent';
 import { aggregateSummaries } from '../services/agents/summaryAgent';
-import { structureChecklistAsEvents } from '../services/agents/checklistAgent';
+import { structureChecklistAsEvents, validateChecklistCompleteness } from '../services/agents/checklistAgent';
 import { generateMapSpecForChecklist } from '../services/mapSpec/generator';
 import { indexConsultationContext } from '../services/rag/indexer';
 import fs from 'fs';
@@ -172,6 +172,89 @@ export const createConsultation = async (req: AuthRequest, res: Response): Promi
     );
     timings['4_db_checklist'] = elapsed(t);
     console.log(`[Pipeline] Step 4 done in ${timings['4_db_checklist']}ms — saved ${checklistItems.length} items`);
+
+    // ── Step 4.5: Verify checklist completeness ──
+    const checklistItemData = eventData.map((e) => ({
+      title: e.title,
+      description: e.description,
+      frequency: 'once',
+      category: e.category,
+      xpReward: e.xpReward,
+      coinReward: e.coinReward,
+      unlockAfterHours: 0,
+      cooldownHours: 0,
+      totalRequired: 1,
+      durationDays: 0,
+      timeOfDay: 'any',
+    }));
+    
+    const validation = validateChecklistCompleteness(checklistItemData, checklistParagraph);
+    
+    console.log(`\n=== CHECKLIST VERIFICATION ===`);
+    console.log(`Total items generated: ${checklistItemData.length}`);
+    console.log(`Medication items: ${checklistItemData.filter(i => i.category === 'medication').length}`);
+    console.log(`Appointment items: ${checklistItemData.filter(i => i.category === 'appointment').length}`);
+    console.log(`Test items: ${checklistItemData.filter(i => i.category === 'test').length}`);
+    
+    if (validation.warnings.length > 0) {
+      console.warn(`⚠️  WARNINGS:`);
+      validation.warnings.forEach(w => console.warn(`   - ${w}`));
+    }
+    
+    if (validation.missing.length > 0) {
+      console.error(`❌ MISSING MEDICATIONS:`);
+      validation.missing.forEach(m => console.error(`   - ${m}`));
+    }
+    
+    if (validation.suggestions.length > 0) {
+      console.log(`💡 SUGGESTIONS:`);
+      validation.suggestions.forEach(s => console.log(`   - ${s}`));
+    }
+    
+    // Log source paragraph preview for debugging
+    console.log(`\nSource paragraph length: ${checklistParagraph.length} chars`);
+    console.log(`Source preview (first 500 chars): ${checklistParagraph.substring(0, 500)}...`);
+    
+    // Check which medications are in source vs generated
+    const sourceLower = checklistParagraph.toLowerCase();
+    const expectedMeds = ['bisoprolol', 'alendronic', 'adcal', 'omeprazole', 'glyceryl', 'trinitrate', 'warfarin', 'folic', 'ramipril', 'simvastatin', 'gliclazide'];
+    const foundInSource: string[] = [];
+    const notFoundInSource: string[] = [];
+    
+    expectedMeds.forEach(med => {
+      if (sourceLower.includes(med)) {
+        foundInSource.push(med);
+      } else {
+        notFoundInSource.push(med);
+      }
+    });
+    
+    console.log(`\nMedications in source: ${foundInSource.length}/${expectedMeds.length}`);
+    if (foundInSource.length > 0) {
+      console.log(`  Found: ${foundInSource.join(', ')}`);
+    }
+    if (notFoundInSource.length > 0) {
+      console.log(`  Not found in source: ${notFoundInSource.join(', ')}`);
+    }
+    
+    const generatedMeds = checklistItemData.filter(i => i.category === 'medication');
+    console.log(`\nGenerated medication titles (${generatedMeds.length}):`, 
+      generatedMeds.map(i => i.title)
+    );
+    
+    // Check for Simvastatin specifically
+    const hasSimvastatinInSource = sourceLower.includes('simvastatin');
+    const hasSimvastatinInGenerated = generatedMeds.some(i => 
+      i.title.toLowerCase().includes('simvastatin') || 
+      i.description.toLowerCase().includes('simvastatin')
+    );
+    
+    if (hasSimvastatinInSource && !hasSimvastatinInGenerated) {
+      console.error(`\n❌ CRITICAL: Simvastatin is in source but NOT in generated checklist!`);
+      console.error(`   Source contains: "${sourceLower.match(/simvastatin[^.]*/i)?.[0] || 'simvastatin'}"`);
+    }
+    
+    console.log(`================================\n`);
 
     // Save consultation with summaries
     await consultation.save();
