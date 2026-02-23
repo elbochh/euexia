@@ -9,34 +9,40 @@ import { processText } from '../services/agents/textAgent';
 import { processPdf } from '../services/agents/pdfAgent';
 import { aggregateSummaries } from '../services/agents/summaryAgent';
 import { structureChecklistAsEvents } from '../services/agents/checklistAgent';
-import {
-  generateMapSpecForChecklist,
-  deriveChecklistSignals,
-} from '../services/mapSpec/generator';
-import {
-  detectThemeWithOpenAI,
-} from '../services/mapImageGenerator';
+import { generateMapSpecForChecklist } from '../services/mapSpec/generator';
 import { indexConsultationContext } from '../services/rag/indexer';
 import fs from 'fs';
 import path from 'path';
 import pdfParse from 'pdf-parse';
 
+/** Simple high-resolution timer helper — returns elapsed ms since a given hrtime */
+function elapsed(start: [number, number]): number {
+  const [s, ns] = process.hrtime(start);
+  return Math.round(s * 1000 + ns / 1e6);
+}
+
 /**
  * Create a new consultation and process all uploads through the AI pipeline.
  *
- * Pipeline (optimised for speed):
- *  1. Process all uploads in PARALLEL (voice/image/text/pdf)
- *  2. Aggregate summaries
- *  3. Run structureChecklist + detectTheme in PARALLEL
- *  4. Save checklist items → return response to user immediately
- *  5. Generate maps in BACKGROUND (fire-and-forget)
+ * Pipeline:
+ *  1. Process all uploads in PARALLEL (voice→SageMaker ASR, image→SageMaker vision,
+ *     text→SageMaker MedGemma, pdf→SageMaker MedGemma)
+ *  2. Aggregate summaries via SageMaker MedGemma
+ *  3. Structure checklist events via OpenAI GPT-4.1 (best quality for JSON structuring)
+ *  4. Save checklist items → return response to user
+ *  5. Generate map spec algorithmically (no AI call — frontend renders via Kenney hex tiles)
+ *  6. Fire-and-forget: RAG context indexing
  */
 export const createConsultation = async (req: AuthRequest, res: Response): Promise<void> => {
+  const pipelineStart = process.hrtime();
+  const timings: Record<string, number> = {};
+
   try {
     const userId = req.userId!;
     const { title, uploads } = req.body;
 
-    // Create consultation
+    // ── Step 0: Create consultation record ──
+    let t = process.hrtime();
     const consultation = await Consultation.create({
       userId,
       title: title || 'My Consultation',
@@ -47,9 +53,13 @@ export const createConsultation = async (req: AuthRequest, res: Response): Promi
       })),
       status: 'processing',
     });
+    timings['0_db_create'] = elapsed(t);
 
-    // Process each upload through appropriate agent (in parallel)
+    // ── Step 1: Process each upload in PARALLEL via SageMaker ──
+    t = process.hrtime();
+    console.log(`[Pipeline] Step 1: Processing ${consultation.uploads.length} upload(s) in parallel via SageMaker...`);
     const summaryPromises = consultation.uploads.map(async (upload, index) => {
+      const uploadStart = process.hrtime();
       try {
         let summary = '';
         switch (upload.type) {
@@ -62,16 +72,12 @@ export const createConsultation = async (req: AuthRequest, res: Response): Promi
           case 'text':
             summary = await processText(upload.rawText || '');
             break;
-          case 'pdf':
-            // Extract text from PDF if fileUrl is provided but rawText is empty
+          case 'pdf': {
             let pdfText = upload.rawText || '';
             if (!pdfText && upload.fileUrl) {
               try {
                 let pdfBuffer: Buffer;
-                
-                // Check if fileUrl is a base64 string or a file path
                 if (upload.fileUrl.startsWith('/uploads/') || upload.fileUrl.startsWith('./uploads/')) {
-                  // It's a file path - read from disk
                   const filePath = path.join(__dirname, '../../', upload.fileUrl);
                   if (fs.existsSync(filePath)) {
                     pdfBuffer = fs.readFileSync(filePath);
@@ -80,73 +86,64 @@ export const createConsultation = async (req: AuthRequest, res: Response): Promi
                     throw new Error(`PDF file not found at ${filePath}`);
                   }
                 } else {
-                  // Assume it's base64-encoded PDF (may include data URL prefix)
                   let base64Data = upload.fileUrl;
-                  // Remove data URL prefix if present (e.g., "data:application/pdf;base64,...")
-                  if (base64Data.includes(',')) {
-                    base64Data = base64Data.split(',')[1];
-                  }
+                  if (base64Data.includes(',')) base64Data = base64Data.split(',')[1];
                   pdfBuffer = Buffer.from(base64Data, 'base64');
                   console.log(`[PDF] Decoding PDF from base64 (${base64Data.length} chars)`);
                 }
-                
                 const pdfData = await pdfParse(pdfBuffer);
                 pdfText = pdfData.text;
-                console.log(`[PDF] Extracted ${pdfText.length} characters from PDF (${pdfData.numpages} pages)`);
+                console.log(`[PDF] Extracted ${pdfText.length} chars from PDF (${pdfData.numpages} pages)`);
               } catch (parseError: any) {
                 console.error('[PDF] Failed to parse PDF:', parseError?.message || parseError);
-                // Continue with empty text - processPdf will handle it gracefully
                 pdfText = '';
               }
             }
-            if (!pdfText) {
-              console.warn('[PDF] No text extracted from PDF - processPdf will receive empty string');
-            }
-            summary = await processPdf(pdfText, []); // pageImages can be added later if needed
+            if (!pdfText) console.warn('[PDF] No text extracted — processPdf will receive empty string');
+            summary = await processPdf(pdfText, []);
             break;
+          }
         }
         consultation.uploads[index].summary = summary;
         consultation.uploads[index].processedAt = new Date();
+        console.log(`[Pipeline]   upload[${index}] ${upload.type} done in ${elapsed(uploadStart)}ms`);
         return summary;
       } catch (err) {
-        console.error(`Failed to process ${upload.type} upload:`, err);
+        console.error(`[Pipeline]   upload[${index}] ${upload.type} FAILED after ${elapsed(uploadStart)}ms:`, err);
         return '';
       }
     });
 
     const summaries = (await Promise.all(summaryPromises)).filter((s) => s.length > 0);
+    timings['1_uploads_parallel'] = elapsed(t);
+    console.log(`[Pipeline] Step 1 done: ${summaries.length} summaries in ${timings['1_uploads_parallel']}ms`);
 
-    // Aggregate all summaries into a checklist paragraph
+    // ── Step 2: Aggregate summaries via SageMaker MedGemma ──
+    t = process.hrtime();
+    console.log(`[Pipeline] Step 2: Aggregating summaries via SageMaker MedGemma...`);
     const rawParagraph = await aggregateSummaries(summaries);
     consultation.aggregatedSummary = summaries.join('\n\n---\n\n');
     consultation.checklistParagraph = rawParagraph;
+    timings['2_aggregate'] = elapsed(t);
+    console.log(`[Pipeline] Step 2 done in ${timings['2_aggregate']}ms — paragraph: ${rawParagraph.length} chars`);
 
-    // Clean the paragraph before passing to the checklist agent:
-    // Remove markdown bold/italic, normalize bullets, collapse whitespace
+    // Clean the paragraph before passing to the checklist agent
     const checklistParagraph = rawParagraph
-      .replace(/\*\*/g, '')           // remove ** bold markers
-      .replace(/\*/g, '')             // remove * italic markers
-      .replace(/^[\s]*[-•*]\s*/gm, '- ')  // normalize bullet markers
-      .replace(/\n{3,}/g, '\n\n')    // collapse excessive newlines
+      .replace(/\*\*/g, '')
+      .replace(/\*/g, '')
+      .replace(/^[\s]*[-•*]\s*/gm, '- ')
+      .replace(/\n{3,}/g, '\n\n')
       .trim();
 
-    console.log(`[Pipeline] Cleaned paragraph length: ${checklistParagraph.length} chars`);
+    // ── Step 3: Structure checklist events via OpenAI GPT-4.1 ──
+    t = process.hrtime();
+    console.log(`[Pipeline] Step 3: Structuring checklist events via OpenAI GPT-4.1...`);
+    const eventData = await structureChecklistAsEvents(checklistParagraph);
+    timings['3_checklist_events'] = elapsed(t);
+    console.log(`[Pipeline] Step 3 done in ${timings['3_checklist_events']}ms — ${eventData.length} events`);
 
-    // ── OPTIMIZATION: Run structureChecklistAsEvents (GPT-4.1) + detectTheme in PARALLEL ──
-    console.log(`Running structureChecklistAsEvents + detectTheme in parallel...`);
-    const [eventData, consultationTheme] = await Promise.all([
-      structureChecklistAsEvents(checklistParagraph),
-      detectThemeWithOpenAI([], rawParagraph),
-    ]);
-
-    console.log(`\n=== CHECKLIST EVENTS GENERATED ===`);
-    console.log(`Generated ${eventData.length} events from GPT-4.1 for consultation ${consultation._id}`);
-    console.log(`\nRaw consultation paragraph used for generation:`);
-    console.log(checklistParagraph);
-    console.log(`===================================\n`);
-
-    // Save one checklist item per event (unlockAt = exact date/time; groupId, orderInGroup for star grouping)
-    const now = new Date();
+    // ── Step 4: Save checklist items to DB ──
+    t = process.hrtime();
     const checklistItems = await ChecklistItem.insertMany(
       eventData.map((event, index) => ({
         consultationId: consultation._id,
@@ -173,17 +170,16 @@ export const createConsultation = async (req: AuthRequest, res: Response): Promi
         orderInGroup: event.orderInGroup,
       }))
     );
-    console.log(`Saved ${checklistItems.length} checklist items (events) to database for consultation ${consultation._id}`);
+    timings['4_db_checklist'] = elapsed(t);
+    console.log(`[Pipeline] Step 4 done in ${timings['4_db_checklist']}ms — saved ${checklistItems.length} items`);
 
-    // Save consultation (with summaries) before map generation
+    // Save consultation with summaries
     await consultation.save();
 
-    // Fire-and-forget context indexing for adaptive RAG retrieval.
-    indexConsultationContext(userId, consultation._id.toString()).catch((err) =>
-      console.warn('[RAG] Failed to index consultation context:', err)
-    );
+    // ── Step 5: Generate algorithmic map spec (no AI call) ──
+    t = process.hrtime();
 
-    // Build group-level data for map: one star per unique starGroupId (typically per day)
+    // Build group-level data: one star per unique starGroupId (typically per day)
     const groupOrder: string[] = [];
     const groupToFirstItem = new Map<string, { category: string; title: string; description: string }>();
     for (const item of checklistItems) {
@@ -198,18 +194,11 @@ export const createConsultation = async (req: AuthRequest, res: Response): Promi
       }
     }
     const checklistItemsData = groupOrder.map((g) => groupToFirstItem.get(g)!);
+    const totalStepCount = checklistItemsData.length;
 
-    // Generate map spec algorithmically — no AI image generation needed.
-    // The frontend renders the map using Kenney hex tiles procedurally.
-    const allItems = checklistItemsData;
-    const signals = deriveChecklistSignals(allItems);
-    const totalStepCount = allItems.length;
+    console.log(`[Pipeline] Step 5: Generating algorithmic map spec for ${totalStepCount} stars...`);
+    const { mapSpec } = await generateMapSpecForChecklist(checklistItemsData, 0, totalStepCount);
 
-    console.log(`Generating map spec for ${totalStepCount} stars (hex tile map, no image needed)`);
-
-    const { mapSpec } = await generateMapSpecForChecklist(allItems, 0, totalStepCount);
-
-    // Save single scrollable map to database
     const savedMap = await MapModel.create({
       consultationId: consultation._id,
       userId,
@@ -217,21 +206,39 @@ export const createConsultation = async (req: AuthRequest, res: Response): Promi
       startStepIndex: 0,
       endStepIndex: totalStepCount - 1,
       mapSpec,
-      source: 'ai',
+      source: 'fallback',
       validationWarnings: [],
       mapImageUrl: null,
       mapImagePath: null,
     });
-
-    console.log(`Generated single scrollable map with ${totalStepCount} checkpoints for consultation ${consultation._id}`);
+    timings['5_map_spec'] = elapsed(t);
+    console.log(`[Pipeline] Step 5 done in ${timings['5_map_spec']}ms — ${totalStepCount} checkpoints`);
 
     consultation.status = 'completed';
     await consultation.save();
 
+    // ── Step 6 (background): RAG context indexing ──
+    indexConsultationContext(userId, consultation._id.toString()).catch((err) =>
+      console.warn('[RAG] Failed to index consultation context:', err)
+    );
+
+    // ── Print timing summary ──
+    const totalMs = elapsed(pipelineStart);
+    console.log(`\n╔════════════════════════════════════════╗`);
+    console.log(`║       PIPELINE TIMING SUMMARY          ║`);
+    console.log(`╠════════════════════════════════════════╣`);
+    for (const [step, ms] of Object.entries(timings)) {
+      const bar = '█'.repeat(Math.min(20, Math.round(ms / 500)));
+      console.log(`║  ${step.padEnd(22)} ${String(ms + 'ms').padStart(7)}  ${bar}`);
+    }
+    console.log(`╠════════════════════════════════════════╣`);
+    console.log(`║  TOTAL                    ${String(totalMs + 'ms').padStart(7)}          ║`);
+    console.log(`╚════════════════════════════════════════╝\n`);
+
     res.status(201).json({
       consultation,
       checklistItems,
-      maps: [savedMap], // Return as array for compatibility
+      maps: [savedMap],
     });
   } catch (error) {
     console.error('Create consultation error:', error);

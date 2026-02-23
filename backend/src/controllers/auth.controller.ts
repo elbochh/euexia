@@ -80,7 +80,8 @@ export const continueAsGuest = async (req: Request, res: Response): Promise<void
     const guestId = crypto.randomBytes(8).toString('hex');
     const email = `guest_${guestId}@euexia.guest`;
     const passwordHash = await bcrypt.hash(crypto.randomBytes(32).toString('hex'), 12);
-    const name = 'Guest';
+    const guestNumber = Math.floor(1000 + Math.random() * 9000);
+    const name = `guest${guestNumber}`;
 
     const user = await User.create({ email, passwordHash, name });
     await GameProgress.create({ userId: user._id });

@@ -5,4 +5,8 @@ dist/
 .env.local
 *.log
 uploads/
+maps/
+
+# Keep example env files tracked
+!.env.example
 

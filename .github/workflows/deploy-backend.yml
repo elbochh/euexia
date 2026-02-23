@@ -1,0 +1,90 @@
+name: Deploy Backend to AWS Elastic Beanstalk
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Manually triggered only.  Go to: Actions → Deploy Backend → Run workflow
+# ─────────────────────────────────────────────────────────────────────────────
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Target environment'
+        required: true
+        default: 'production'
+        type: choice
+        options:
+          - production
+
+jobs:
+  deploy:
+    name: Build & Deploy Backend
+    runs-on: ubuntu-latest
+
+    steps:
+      # ── 1. Checkout ──────────────────────────────────────────────────────
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # ── 2. Set up Node.js ────────────────────────────────────────────────
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: backend/package-lock.json
+
+      # ── 3. Install dependencies ──────────────────────────────────────────
+      - name: Install backend dependencies
+        working-directory: backend
+        run: npm ci
+
+      # ── 4. TypeScript build ──────────────────────────────────────────────
+      - name: Build TypeScript → dist/
+        working-directory: backend
+        run: npm run build
+
+      # ── 5. Package for Elastic Beanstalk ─────────────────────────────────
+      # EB needs: package.json, dist/, Procfile, .ebextensions/, node_modules/
+      # We install production-only deps into the artifact to keep size small.
+      - name: Install production dependencies only
+        working-directory: backend
+        run: npm ci --omit=dev
+
+      - name: Create EB deployment zip
+        run: |
+          cd backend
+          # Zip everything EB needs (exclude dev files)
+          zip -r ../deploy-backend.zip \
+            dist/ \
+            node_modules/ \
+            package.json \
+            package-lock.json \
+            Procfile \
+            .ebextensions/ \
+            -x "*.ts" -x "src/*" -x "*.test.*" -x ".env"
+
+      # ── 6. Deploy to Elastic Beanstalk ───────────────────────────────────
+      - name: Deploy to Elastic Beanstalk
+        uses: einaregilsson/beanstalk-deploy@v22
+        with:
+          aws_access_key: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws_secret_key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          application_name: ${{ secrets.EB_APPLICATION_NAME }}
+          environment_name: ${{ secrets.EB_ENVIRONMENT_NAME }}
+          region: ${{ secrets.AWS_REGION }}
+          version_label: euexia-backend-${{ github.sha }}
+          deployment_package: deploy-backend.zip
+          wait_for_environment_recovery: 120
+
+      # ── 7. Health check ──────────────────────────────────────────────────
+      - name: Wait for deployment and health check
+        run: |
+          echo "Waiting 30s for EB to stabilise..."
+          sleep 30
+          HEALTH=$(curl -s -o /dev/null -w "%{http_code}" \
+            "https://${{ secrets.EB_ENVIRONMENT_URL }}/api/health")
+          echo "Health check HTTP status: $HEALTH"
+          if [ "$HEALTH" != "200" ]; then
+            echo "❌ Health check failed (HTTP $HEALTH)"
+            exit 1
+          fi
+          echo "✅ Backend is healthy"

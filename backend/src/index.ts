@@ -15,9 +15,21 @@ import chatRoutes from './routes/chat.routes';
 const app = express();
 const PORT = process.env.PORT || 5000;
 
-// Middleware
+// Allowed CORS origins.
+// FRONTEND_URL is set in production (Amplify URL or custom domain).
+// In development, localhost:3000 / 3001 are always allowed.
+const CORS_ORIGINS: (string | RegExp)[] = [
+  'http://localhost:3000',
+  'http://localhost:3001',
+];
+if (process.env.FRONTEND_URL) {
+  CORS_ORIGINS.push(process.env.FRONTEND_URL);
+}
+// Also allow any *.amplifyapp.com subdomain automatically
+CORS_ORIGINS.push(/https:\/\/.*\.amplifyapp\.com$/);
+
 app.use(cors({
-  origin: ['http://localhost:3000', 'http://localhost:3001'],
+  origin: CORS_ORIGINS,
   credentials: true,
 }));
 app.use(express.json({ limit: '50mb' }));

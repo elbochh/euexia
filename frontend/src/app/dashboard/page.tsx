@@ -17,6 +17,7 @@ const GameCanvas = dynamic(() => import('@/components/game/GameCanvas'), { ssr: 
 export default function DashboardPage() {
   const router = useRouter();
   const {
+    user,
     isAuthenticated,
     progress,
     checklist,
@@ -183,6 +184,7 @@ export default function DashboardPage() {
             checklistItems={mapChecklist}
             eventsPerStar={mapEventsPerStar}
             onCheckpointClick={handleCheckpointClick}
+            userName={user?.name}
           />
 
           {/* In-map HUD (minimal, top-left, no container) */}

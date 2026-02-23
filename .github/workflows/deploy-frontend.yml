@@ -1,0 +1,89 @@
+name: Deploy Frontend to AWS Amplify
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Manually triggered only.  Go to: Actions → Deploy Frontend → Run workflow
+# ─────────────────────────────────────────────────────────────────────────────
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Target environment'
+        required: true
+        default: 'production'
+        type: choice
+        options:
+          - production
+
+jobs:
+  deploy:
+    name: Trigger Amplify Deployment
+    runs-on: ubuntu-latest
+
+    steps:
+      # ── 1. Checkout ──────────────────────────────────────────────────────
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # ── 2. Configure AWS credentials ─────────────────────────────────────
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      # ── 3. Trigger Amplify build for the main branch ─────────────────────
+      # Amplify will pull the latest code from GitHub and run its own build.
+      - name: Start Amplify deployment
+        id: amplify_deploy
+        run: |
+          JOB_ID=$(aws amplify start-job \
+            --app-id "${{ secrets.AMPLIFY_APP_ID }}" \
+            --branch-name main \
+            --job-type RELEASE \
+            --query 'jobSummary.jobId' \
+            --output text)
+          echo "job_id=$JOB_ID" >> $GITHUB_OUTPUT
+          echo "Amplify job started: $JOB_ID"
+
+      # ── 4. Poll until the Amplify job completes ──────────────────────────
+      - name: Wait for Amplify build to complete
+        run: |
+          JOB_ID="${{ steps.amplify_deploy.outputs.job_id }}"
+          APP_ID="${{ secrets.AMPLIFY_APP_ID }}"
+          BRANCH="main"
+
+          echo "Polling Amplify job $JOB_ID ..."
+          for i in $(seq 1 30); do
+            STATUS=$(aws amplify get-job \
+              --app-id "$APP_ID" \
+              --branch-name "$BRANCH" \
+              --job-id "$JOB_ID" \
+              --query 'job.summary.status' \
+              --output text)
+
+            echo "  Attempt $i — status: $STATUS"
+
+            if [ "$STATUS" = "SUCCEED" ]; then
+              echo "✅ Amplify deployment succeeded"
+              exit 0
+            elif [ "$STATUS" = "FAILED" ] || [ "$STATUS" = "CANCELLED" ]; then
+              echo "❌ Amplify deployment $STATUS"
+              exit 1
+            fi
+
+            sleep 30
+          done
+
+          echo "⏱️ Timed out waiting for Amplify deployment (15 min)"
+          exit 1
+
+      # ── 5. Print deployed URL ────────────────────────────────────────────
+      - name: Print deployment URL
+        run: |
+          URL=$(aws amplify get-branch \
+            --app-id "${{ secrets.AMPLIFY_APP_ID }}" \
+            --branch-name main \
+            --query 'branch.displayName' \
+            --output text 2>/dev/null || echo "")
+          echo "🚀 Frontend deployed at: https://main.${{ secrets.AMPLIFY_APP_ID }}.amplifyapp.com"
