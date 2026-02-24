@@ -27,13 +27,23 @@ export const getChecklistByConsultation = async (
 ): Promise<void> => {
   try {
     const { consultationId } = req.params;
+    const { includeExpired } = req.query; // Optional: ?includeExpired=false to hide expired items
+    
     const items = await ChecklistItem.find({
       userId: req.userId,
       consultationId,
     })
       .sort({ order: 1 })
       .lean();
-    res.json({ items: items.map((item) => addTimingInfo(item, items)) });
+    
+    const itemsWithTiming = items.map((item) => addTimingInfo(item, items));
+    
+    // Filter out expired items if includeExpired=false
+    const filteredItems = includeExpired === 'false' 
+      ? itemsWithTiming.filter((item) => !item.isExpired)
+      : itemsWithTiming;
+    
+    res.json({ items: filteredItems });
   } catch (error) {
     res.status(500).json({ error: 'Failed to get checklist items' });
   }
@@ -265,6 +275,9 @@ function addTimingInfo(item: any, allItemsInConsultation?: any[]): any {
     isAvailable,
     remainingSeconds: Math.max(0, remainingSeconds),
     completionProgress,
+    // Include unlockAt and nextDueAt for frontend grouping
+    unlockAt: item.unlockAt ? new Date(item.unlockAt).toISOString() : null,
+    nextDueAt: item.nextDueAt ? new Date(item.nextDueAt).toISOString() : null,
   };
 }
 

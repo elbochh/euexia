@@ -3,6 +3,94 @@ import { useGameStore } from '@/stores/gameStore';
 import ChecklistItem from './ChecklistItem';
 import { motion } from 'framer-motion';
 
+// Type for checklist items - matches the store's ChecklistItem interface
+type ChecklistItemType = {
+  _id: string;
+  title: string;
+  description: string;
+  frequency: string;
+  isCompleted: boolean;
+  xpReward: number;
+  coinReward: number;
+  category: string;
+  order: number;
+  unlockAt: string | null;
+  nextDueAt: string | null;
+  isLocked?: boolean;
+  isOnCooldown?: boolean;
+  isExpired?: boolean;
+  isAvailable?: boolean;
+  isFullyDone?: boolean;
+  remainingSeconds?: number;
+  completionProgress?: string | null;
+  timeOfDay?: string;
+  [key: string]: any;
+};
+
+/** Format date to show day name and date */
+function formatDayHeader(date: Date): string {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const tomorrow = new Date(today);
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  const dayDate = new Date(date);
+  dayDate.setHours(0, 0, 0, 0);
+
+  const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+  const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+  if (dayDate.getTime() === today.getTime()) {
+    return 'Today';
+  } else if (dayDate.getTime() === tomorrow.getTime()) {
+    return 'Tomorrow';
+  } else {
+    const dayName = dayNames[date.getDay()];
+    const month = monthNames[date.getMonth()];
+    const day = date.getDate();
+    return `${dayName}, ${month} ${day}`;
+  }
+}
+
+/** Format time from date */
+function formatTime(date: Date): string {
+  const hours = date.getHours();
+  const minutes = date.getMinutes();
+  const ampm = hours >= 12 ? 'PM' : 'AM';
+  const displayHours = hours % 12 || 12;
+  const displayMinutes = minutes.toString().padStart(2, '0');
+  return `${displayHours}:${displayMinutes} ${ampm}`;
+}
+
+/** Group tasks by day based on unlockAt or nextDueAt */
+function groupTasksByDay(tasks: ChecklistItemType[]): Map<string, ChecklistItemType[]> {
+  const groups = new Map<string, ChecklistItemType[]>();
+  
+  tasks.forEach((task) => {
+    // Use unlockAt for locked tasks, nextDueAt for cooldown tasks
+    const dateStr = task.unlockAt || task.nextDueAt;
+    if (!dateStr) return;
+    
+    const date = new Date(dateStr);
+    const dayKey = date.toISOString().split('T')[0]; // YYYY-MM-DD
+    
+    if (!groups.has(dayKey)) {
+      groups.set(dayKey, []);
+    }
+    groups.get(dayKey)!.push(task);
+  });
+  
+  // Sort tasks within each day by time
+  groups.forEach((dayTasks, dayKey) => {
+    dayTasks.sort((a, b) => {
+      const dateA = new Date(a.unlockAt || a.nextDueAt || '');
+      const dateB = new Date(b.unlockAt || b.nextDueAt || '');
+      return dateA.getTime() - dateB.getTime();
+    });
+  });
+  
+  return groups;
+}
+
 export default function ChecklistView() {
   const { checklist, completeItem, isLoading } = useGameStore();
 
@@ -18,6 +106,10 @@ export default function ChecklistView() {
   );
   const fullyDone = checklist.filter((i) => i.isFullyDone);
   const expired = checklist.filter((i) => i.isExpired && !i.isFullyDone);
+
+  // Group locked/cooldown tasks by day
+  const lockedByDay = groupTasksByDay(lockedOrCooldown);
+  const sortedDayKeys = Array.from(lockedByDay.keys()).sort();
 
   const totalDone = fullyDone.length + completedThisCycle.length;
   const progress =
@@ -91,20 +183,48 @@ export default function ChecklistView() {
         </div>
       )}
 
-      {/* Locked / On Cooldown */}
+      {/* Locked / On Cooldown - Grouped by Day */}
       {lockedOrCooldown.length > 0 && (
         <div className="mb-6">
           <h3 className="text-sm font-bold text-orange-300 mb-3 px-1">
             ⏳ Coming Up ({lockedOrCooldown.length})
           </h3>
-          {lockedOrCooldown.map((item, i) => (
-            <ChecklistItem
-              key={item._id}
-              item={item}
-              index={i}
-              onComplete={completeItem}
-            />
-          ))}
+          {sortedDayKeys.map((dayKey) => {
+            const dayTasks = lockedByDay.get(dayKey)!;
+            const firstTask = dayTasks[0];
+            const taskDate = new Date(firstTask.unlockAt || firstTask.nextDueAt || '');
+            const dayHeader = formatDayHeader(taskDate);
+            
+            return (
+              <div key={dayKey} className="mb-4">
+                {/* Day Header */}
+                <div className="flex items-center gap-2 mb-2 px-2 py-1.5 rounded-lg bg-orange-500/10 border border-orange-500/20">
+                  <span className="text-orange-300 text-xs font-semibold">
+                    📅 {dayHeader}
+                  </span>
+                </div>
+                
+                {/* Tasks for this day */}
+                {dayTasks.map((item, i) => {
+                  const itemDate = new Date(item.unlockAt || item.nextDueAt || '');
+                  const timeStr = formatTime(itemDate);
+                  
+                  return (
+                    <div key={item._id} className="ml-4 mb-2">
+                      <div className="text-xs text-gray-500 mb-1 px-2">
+                        {timeStr}
+                      </div>
+                      <ChecklistItem
+                        item={item}
+                        index={i}
+                        onComplete={completeItem}
+                      />
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })}
         </div>
       )}
 

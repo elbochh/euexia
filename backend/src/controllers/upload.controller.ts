@@ -11,6 +11,7 @@ import { aggregateSummaries } from '../services/agents/summaryAgent';
 import { structureChecklistAsEvents, validateChecklistCompleteness } from '../services/agents/checklistAgent';
 import { generateMapSpecForChecklist } from '../services/mapSpec/generator';
 import { indexConsultationContext } from '../services/rag/indexer';
+import { extractMedicationNames } from '../services/agents/medicationExtractor';
 import fs from 'fs';
 import path from 'path';
 import pdfParse from 'pdf-parse';
@@ -118,17 +119,50 @@ export const createConsultation = async (req: AuthRequest, res: Response): Promi
     timings['1_uploads_parallel'] = elapsed(t);
     console.log(`[Pipeline] Step 1 done: ${summaries.length} summaries in ${timings['1_uploads_parallel']}ms`);
 
+    // ── Step 1.5: Pre-extract medication names from raw text (rule-based, no AI) ──
+    // This catches EVERY medication deterministically so the AI summary agent can't miss any
+    const allRawText = summaries.join('\n\n');
+    const detectedMeds = extractMedicationNames(allRawText);
+    const medListForPrompt = detectedMeds.length > 0
+      ? detectedMeds.map((m, i) => `  ${i + 1}. ${m.rawMatch}`).join('\n')
+      : '';
+    console.log(`[Pipeline] Step 1.5: Pre-extracted ${detectedMeds.length} medications from raw text`);
+    if (detectedMeds.length > 0) {
+      console.log(`[Pipeline]   Medications found: ${detectedMeds.map(m => m.name).join(', ')}`);
+    }
+
     // ── Step 2: Aggregate summaries via SageMaker MedGemma ──
     t = process.hrtime();
     console.log(`[Pipeline] Step 2: Aggregating summaries via SageMaker MedGemma...`);
-    const rawParagraph = await aggregateSummaries(summaries);
+    const rawParagraph = await aggregateSummaries(summaries, medListForPrompt || undefined);
     consultation.aggregatedSummary = summaries.join('\n\n---\n\n');
-    consultation.checklistParagraph = rawParagraph;
     timings['2_aggregate'] = elapsed(t);
     console.log(`[Pipeline] Step 2 done in ${timings['2_aggregate']}ms — paragraph: ${rawParagraph.length} chars`);
 
+    // ── Step 2.5: Post-validate — patch any medications the AI model still missed ──
+    let finalParagraph = rawParagraph;
+    if (detectedMeds.length > 0) {
+      const paragraphLower = rawParagraph.toLowerCase();
+      const missingMeds = detectedMeds.filter(
+        (m) => !paragraphLower.includes(m.name.toLowerCase())
+      );
+      if (missingMeds.length > 0) {
+        console.warn(`[Pipeline] ⚠️ AI model missed ${missingMeds.length} medication(s): ${missingMeds.map(m => m.name).join(', ')}`);
+        // Append the missing medications directly to the paragraph
+        const patch = missingMeds
+          .map((m) => `${m.rawMatch}.`)
+          .join(' ');
+        finalParagraph = `${rawParagraph}\n\nADDITIONAL MEDICATIONS (from source): ${patch}`;
+        console.log(`[Pipeline]   Patched ${missingMeds.length} missing medication(s) into summary`);
+      } else {
+        console.log(`[Pipeline] ✓ All ${detectedMeds.length} pre-extracted medications present in summary`);
+      }
+    }
+
+    consultation.checklistParagraph = finalParagraph;
+
     // Clean the paragraph before passing to the checklist agent
-    const checklistParagraph = rawParagraph
+    const checklistParagraph = finalParagraph
       .replace(/\*\*/g, '')
       .replace(/\*/g, '')
       .replace(/^[\s]*[-•*]\s*/gm, '- ')
@@ -144,37 +178,122 @@ export const createConsultation = async (req: AuthRequest, res: Response): Promi
 
     // ── Step 4: Save checklist items to DB ──
     t = process.hrtime();
+    const now = new Date();
+    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    
+    // Additional deduplication: remove events with same title, category, and same unlockAt date
+    const seenBeforeSave = new Map<string, boolean>();
+    const deduplicatedEvents = eventData.filter((event) => {
+      const unlockDate = new Date(event.unlockAt).toISOString().split('T')[0]; // YYYY-MM-DD
+      const key = `${event.category}_${event.title.toLowerCase().trim()}_${unlockDate}`;
+      
+      if (seenBeforeSave.has(key)) {
+        console.warn(`[Checklist] Duplicate event filtered before save: ${event.title} (category: ${event.category}, date: ${unlockDate})`);
+        return false;
+      }
+      
+      seenBeforeSave.set(key, true);
+      return true;
+    });
+    
+    console.log(`[Checklist] Before save deduplication: ${eventData.length} events → ${deduplicatedEvents.length} unique events`);
+    
+    // Calculate expiration dates for medication sequences
+    // For each medication sequence, find the last event's date and set expiresAt to that date + 1 day
+    const medicationSequenceExpiry = new Map<string, Date>();
+    deduplicatedEvents.forEach((event) => {
+      if (event.category === 'medication') {
+        const seqId = event.sequenceId || event.groupId || '';
+        if (seqId) {
+          const eventDate = new Date(event.unlockAt);
+          const existing = medicationSequenceExpiry.get(seqId);
+          if (!existing || eventDate > existing) {
+            // Set expiry to last event date + 1 day (to allow completion on the last day)
+            const expiryDate = new Date(eventDate);
+            expiryDate.setDate(expiryDate.getDate() + 1);
+            expiryDate.setHours(23, 59, 59, 999); // End of day
+            medicationSequenceExpiry.set(seqId, expiryDate);
+          }
+        }
+      }
+    });
+    
     const checklistItems = await ChecklistItem.insertMany(
-      eventData.map((event, index) => ({
-        consultationId: consultation._id,
-        userId,
-        title: event.title,
-        description: event.description,
-        frequency: 'once',
-        category: event.category,
-        xpReward: event.xpReward,
-        coinReward: event.coinReward,
-        order: index,
-        unlockAt: new Date(event.unlockAt),
-        cooldownMinutes: 0,
-        nextDueAt: new Date(event.unlockAt),
-        totalRequired: 1,
-        completionCount: 0,
-        durationDays: 0,
-        expiresAt: null,
-        timeOfDay: 'any',
-        isFullyDone: false,
-        groupId: event.groupId,
-        sequenceId: event.sequenceId,
-        starGroupId: event.starGroupId,
-        orderInGroup: event.orderInGroup,
-      }))
+      deduplicatedEvents.map((event, index) => {
+        const eventUnlockAt = new Date(event.unlockAt);
+        const eventDateStart = new Date(eventUnlockAt.getFullYear(), eventUnlockAt.getMonth(), eventUnlockAt.getDate());
+        
+        // For medication tasks: unlock first dose immediately if it's scheduled for today
+        // Lock second dose onwards and future-day medications
+        let unlockAt: Date | null = eventUnlockAt;
+        if (event.category === 'medication') {
+          const isFirstDose = (event.orderInGroup ?? 0) === 0;
+          const isToday = eventDateStart.getTime() === todayStart.getTime();
+          
+          if (isFirstDose && isToday) {
+            // First dose of medication scheduled for today → unlock immediately
+            unlockAt = null;
+          }
+          // For second dose onwards (orderInGroup > 0) or future days, keep unlockAt as is
+          // They will unlock after the previous dose is completed (via group locking logic)
+        }
+        
+        // Calculate expiresAt: for medications, use the sequence expiry date
+        let expiresAt: Date | null = null;
+        if (event.category === 'medication') {
+          const seqId = event.sequenceId || event.groupId || '';
+          if (seqId && medicationSequenceExpiry.has(seqId)) {
+            expiresAt = medicationSequenceExpiry.get(seqId)!;
+          }
+        }
+        
+        // Calculate durationDays from first to last event in sequence (for medications)
+        let durationDays = 0;
+        if (event.category === 'medication') {
+          const seqId = event.sequenceId || event.groupId || '';
+          if (seqId && medicationSequenceExpiry.has(seqId)) {
+            const firstEvent = deduplicatedEvents.find(e => 
+              (e.sequenceId || e.groupId || '') === seqId && (e.orderInGroup ?? 0) === 0
+            );
+            if (firstEvent) {
+              const firstDate = new Date(firstEvent.unlockAt);
+              const lastDate = medicationSequenceExpiry.get(seqId)!;
+              durationDays = Math.ceil((lastDate.getTime() - firstDate.getTime()) / (1000 * 60 * 60 * 24));
+            }
+          }
+        }
+        
+        return {
+          consultationId: consultation._id,
+          userId,
+          title: event.title,
+          description: event.description,
+          frequency: 'once',
+          category: event.category,
+          xpReward: event.xpReward,
+          coinReward: event.coinReward,
+          order: index,
+          unlockAt: unlockAt,
+          cooldownMinutes: 0,
+          nextDueAt: unlockAt || now,
+          totalRequired: 1,
+          completionCount: 0,
+          durationDays: durationDays,
+          expiresAt: expiresAt,
+          timeOfDay: 'any',
+          isFullyDone: false,
+          groupId: event.groupId,
+          sequenceId: event.sequenceId,
+          starGroupId: event.starGroupId,
+          orderInGroup: event.orderInGroup,
+        };
+      })
     );
     timings['4_db_checklist'] = elapsed(t);
     console.log(`[Pipeline] Step 4 done in ${timings['4_db_checklist']}ms — saved ${checklistItems.length} items`);
 
     // ── Step 4.5: Verify checklist completeness ──
-    const checklistItemData = eventData.map((e) => ({
+    const checklistItemData = deduplicatedEvents.map((e) => ({
       title: e.title,
       description: e.description,
       frequency: 'once',

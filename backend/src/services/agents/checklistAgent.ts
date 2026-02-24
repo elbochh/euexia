@@ -515,47 +515,92 @@ function ruleBasedFallback(paragraph: string): ChecklistItemData[] {
 /* ------------------------------------------------------------------ */
 
 function buildEventsPrompt(paragraph: string, nowIso: string): string {
-  return `You are a clinical AI assistant. Convert the care plan into a JSON array of EVENTS.
-Each event = one actionable occurrence the patient can mark complete. Use "now" as the consultation time.
+  return `Convert the care plan into a JSON array of events. Each event = one actionable task the patient can complete.
+
+Extract ALL actionable items: medications, appointments, tests, monitoring, lifestyle changes. Create events for each occurrence.
 
 RULES:
-1. One event per occurrence. "Take medicine X daily for 7 days" = 7 events (same title, groupId, orderInGroup 0..6).
-2. Events that can be done the same day without order = same groupId, same or different orderInGroup.
-3. unlockAt = exact date-time in ISO 8601 (e.g. "2025-02-20T00:00:00.000Z"). Day 1 = first day from now, Day 2 = next day, etc.
-4. Time of day: "morning" → 08:00, "afternoon" → 14:00, "evening" → 18:00, "night" → 19:00. Default 00:00 if not specified.
-5. sequenceId: string to represent a routine chain (e.g. "tylenol-night"). Events with same sequenceId are sequential by orderInGroup.
-6. starGroupId: string to group events under the same star on map. SAME DAY events should usually share the same starGroupId.
-7. orderInGroup: 0, 1, 2, ... For sequential unlock inside sequenceId (event N unlocks only when event N-1 is completed).
-8. Include progress marker in title for recurring chains, e.g. "Drink water (1/3)", "Drink water (2/3)".
-9. title: SHORT (e.g. "Take Amoxicillin", "Check blood pressure"). description: practical advice with dose/timing.
-10. Return ONLY a valid JSON array — no markdown, no explanation.
-Reference "now" for relative dates: ${nowIso}
+1. Frequency expansion:
+   - Daily for 7 days = 7 events (orderInGroup 0..6)
+   - Twice daily for 7 days = 14 events (morning 08:00 + evening 19:00, orderInGroup 0..13)
+   - Three times daily = 21 events (08:00, 14:00, 19:00, orderInGroup 0..20)
+2. unlockAt: ISO 8601 date-time. Day 1 = first day from now. Times: morning 08:00, afternoon 14:00, evening 18:00, night 19:00.
+3. sequenceId: unique per medication/routine. Same sequenceId = sequential unlock by orderInGroup.
+4. starGroupId: same day events share same starGroupId (use date YYYY-MM-DD).
+5. title: short, actionable (e.g., "Take Amoxicillin", "Book follow-up in 6 weeks", "Get FBC test", "Check INR weekly").
+6. description: complete details (dose/timing for meds, timeframe/doctor for appointments, specific test name for tests).
+7. Return ONLY valid JSON array — no markdown.
 
-JSON schema per event:
-{
-  "title": "string (short, max 30 chars)",
-  "description": "string (practical advice)",
-  "category": "medication|nutrition|exercise|monitoring|appointment|test|lifestyle|general",
-  "xpReward": 5-30,
-  "coinReward": 3-15,
-  "unlockAt": "ISO 8601 date-time string",
-  "groupId": "string (legacy alias, set same as sequenceId)",
-  "sequenceId": "string (dependency chain id)",
-  "starGroupId": "string (same star on map, typically same day bucket)",
-  "orderInGroup": 0-based index within group
-}
+Reference "now": ${nowIso}
 
-Example (daily medicine for 3 days, morning):
-[
-  {"title":"Take Amoxicillin (1/3)","description":"Take 500mg with breakfast.","category":"medication","xpReward":25,"coinReward":12,"unlockAt":"2025-02-20T08:00:00.000Z","groupId":"amox","sequenceId":"amox","starGroupId":"2025-02-20","orderInGroup":0},
-  {"title":"Take Amoxicillin (2/3)","description":"Take 500mg with breakfast.","category":"medication","xpReward":25,"coinReward":12,"unlockAt":"2025-02-21T08:00:00.000Z","groupId":"amox","sequenceId":"amox","starGroupId":"2025-02-21","orderInGroup":1},
-  {"title":"Take Amoxicillin (3/3)","description":"Take 500mg with breakfast.","category":"medication","xpReward":25,"coinReward":12,"unlockAt":"2025-02-22T08:00:00.000Z","groupId":"amox","sequenceId":"amox","starGroupId":"2025-02-22","orderInGroup":2}
-]
+Schema: {"title":"string","description":"string","category":"medication|nutrition|exercise|monitoring|appointment|test|lifestyle|general","xpReward":5-30,"coinReward":3-15,"unlockAt":"ISO 8601","groupId":"string","sequenceId":"string","starGroupId":"string","orderInGroup":0}
+
+Examples:
+[{"title":"Take Amoxicillin (1/3)","description":"Take 500mg with breakfast.","category":"medication","xpReward":25,"coinReward":12,"unlockAt":"2025-02-20T08:00:00.000Z","groupId":"amox","sequenceId":"amox","starGroupId":"2025-02-20","orderInGroup":0}]
+[{"title":"Take Metformin (1/4)","description":"Take 500mg with breakfast.","category":"medication","xpReward":25,"coinReward":12,"unlockAt":"2025-02-20T08:00:00.000Z","groupId":"metformin","sequenceId":"metformin","starGroupId":"2025-02-20","orderInGroup":0},{"title":"Take Metformin (2/4)","description":"Take 500mg with dinner.","category":"medication","xpReward":25,"coinReward":12,"unlockAt":"2025-02-20T19:00:00.000Z","groupId":"metformin","sequenceId":"metformin","starGroupId":"2025-02-20","orderInGroup":1}]
+[{"title":"Book follow-up in 6 weeks","description":"Schedule follow-up in 6 weeks with Dr Wide. Bring medication list.","category":"appointment","xpReward":20,"coinReward":10,"unlockAt":"2025-02-20T00:00:00.000Z","groupId":"appt","sequenceId":"appt","starGroupId":"2025-02-20","orderInGroup":0},{"title":"Get FBC test","description":"Get FBC test every two weeks. No fasting required.","category":"test","xpReward":20,"coinReward":10,"unlockAt":"2025-02-20T00:00:00.000Z","groupId":"fbc","sequenceId":"fbc","starGroupId":"2025-02-20","orderInGroup":0},{"title":"Check INR weekly","description":"Check INR levels weekly. Contact Dr Deep if INR falls below 2.0.","category":"monitoring","xpReward":15,"coinReward":8,"unlockAt":"2025-02-20T00:00:00.000Z","groupId":"inr","sequenceId":"inr","starGroupId":"2025-02-20","orderInGroup":0}]
 
 Care plan:
 ${paragraph}
 
 JSON array:`;
+}
+
+/**
+ * Check if a task should be filtered out (diagnosis, finding, incomplete, vague)
+ */
+function shouldFilterTask(title: string, description: string, category: string): boolean {
+  const titleLower = title.toLowerCase();
+  const descLower = description.toLowerCase();
+  
+  // Filter out diagnoses (common medical conditions)
+  const diagnoses = [
+    'ventricular failure', 'anaemia', 'anemia', 'diabetes', 'hypertension',
+    'asthma', 'copd', 'heart failure', 'kidney disease', 'liver disease',
+    'arthritis', 'osteoporosis', 'depression', 'anxiety', 'epilepsy'
+  ];
+  if (diagnoses.some(d => titleLower.includes(d) || descLower.includes(d))) {
+    // But allow if it's clearly a task (e.g., "Monitor for heart failure symptoms")
+    if (!titleLower.match(/(monitor|check|watch|track|manage|treat)/)) {
+      return true;
+    }
+  }
+  
+  // Filter out procedure findings
+  if (titleLower.match(/(showed|revealed|found|demonstrated|indicated)\s+/) ||
+      descLower.match(/(showed|revealed|found|demonstrated|indicated)\s+/)) {
+    return true;
+  }
+  
+  // Filter out incomplete appointments (missing timeframe or doctor)
+  if (category === 'appointment') {
+    if (titleLower.match(/^(weeks?|days?|months?)\s+with/i) || // "weeks with Dr Wide"
+        titleLower.match(/^(with|see|visit)\s+dr/i) || // "with Dr Wide" (no timeframe)
+        titleLower.length < 15) { // too short to be complete
+      return true;
+    }
+  }
+  
+  // Filter out vague monitoring
+  if (category === 'monitoring' && (titleLower === 'monitor health' || titleLower === 'monitor')) {
+    return true;
+  }
+  
+  // Filter out incomplete contact instructions
+  if (titleLower.match(/^(contact|call|reach)\s+dr/i) && 
+      !descLower.match(/if\s+[^.]{5,}/)) { // must have "if [condition]"
+    return true;
+  }
+  
+  // Filter out generic lab test tasks when no specific test is mentioned
+  if (category === 'test' && 
+      (titleLower.match(/^(get|do|have)\s+(lab\s+)?tests?/i) ||
+       descLower.includes('does not include specific lab results') ||
+       descLower.includes('no specific lab results'))) {
+    return true;
+  }
+  
+  return false;
 }
 
 function validateAndNormalizeEvents(raw: any[], now: Date): ChecklistEventData[] {
@@ -575,10 +620,14 @@ function validateAndNormalizeEvents(raw: any[], now: Date): ChecklistEventData[]
       const starGroupId = String(item.starGroupId ?? dateKey);
       const groupId = String(item.groupId ?? sequenceId);
       const orderInGroup = typeof item.orderInGroup === 'number' ? Math.max(0, item.orderInGroup) : 0;
+      const title = cleanTitle(String(item.title));
+      const description = String(item.description ?? '');
+      const category = validCategories.includes(item.category) ? item.category : 'general';
+      
       return {
-        title: cleanTitle(String(item.title)),
-        description: String(item.description ?? ''),
-        category: validCategories.includes(item.category) ? item.category : 'general',
+        title,
+        description,
+        category,
         xpReward: typeof item.xpReward === 'number' ? Math.min(30, Math.max(5, item.xpReward)) : 10,
         coinReward: typeof item.coinReward === 'number' ? Math.min(15, Math.max(3, item.coinReward)) : 5,
         unlockAt,
@@ -587,14 +636,41 @@ function validateAndNormalizeEvents(raw: any[], now: Date): ChecklistEventData[]
         starGroupId,
         orderInGroup,
       };
+    })
+    .filter((item) => {
+      // Filter out invalid tasks
+      if (shouldFilterTask(item.title, item.description, item.category)) {
+        console.warn(`[Checklist] Filtered out invalid task: "${item.title}" (category: ${item.category})`);
+        return false;
+      }
+      return true;
     });
 
-  const totalsBySequence = new Map<string, number>();
+  // Deduplicate: remove events with same title, same sequenceId, and same unlockAt time
+  const seen = new Map<string, boolean>();
+  const deduplicated: ChecklistEventData[] = [];
+  
   normalized.forEach((e) => {
+    // Create a unique key: sequenceId + title + unlockAt date (without time)
+    const unlockDate = new Date(e.unlockAt).toISOString().split('T')[0]; // YYYY-MM-DD
+    const key = `${e.sequenceId}_${e.title.toLowerCase().trim()}_${unlockDate}`;
+    
+    if (!seen.has(key)) {
+      seen.set(key, true);
+      deduplicated.push(e);
+    } else {
+      console.warn(`[Checklist] Duplicate event filtered: ${e.title} (sequenceId: ${e.sequenceId}, date: ${unlockDate})`);
+    }
+  });
+  
+  console.log(`[Checklist] Deduplicated ${normalized.length} events → ${deduplicated.length} unique events`);
+
+  const totalsBySequence = new Map<string, number>();
+  deduplicated.forEach((e) => {
     totalsBySequence.set(e.sequenceId, (totalsBySequence.get(e.sequenceId) || 0) + 1);
   });
 
-  return normalized.map((e) => {
+  return deduplicated.map((e) => {
     const total = totalsBySequence.get(e.sequenceId) || 1;
     const hasProgressSuffix = /\(\d+\/\d+\)$/.test(e.title.trim());
     if (total > 1 && !hasProgressSuffix) {
@@ -744,19 +820,19 @@ export async function structureChecklist(paragraph: string): Promise<ChecklistIt
 
   // ── Ultimate fallback: single generic item (should rarely reach here) ──
   console.warn('[Checklist] ⚠️ All attempts failed — using single-item fallback');
-  return [
-    {
-      title: 'Follow care plan',
+    return [
+      {
+        title: 'Follow care plan',
       description: paragraph.substring(0, 500),
-      frequency: 'daily',
-      category: 'general',
-      xpReward: 10,
-      coinReward: 5,
+        frequency: 'daily',
+        category: 'general',
+        xpReward: 10,
+        coinReward: 5,
       unlockAfterHours: 0,
       cooldownHours: 24,
       totalRequired: 0,
       durationDays: 0,
       timeOfDay: 'any',
-    },
-  ];
-}
+      },
+    ];
+  }
