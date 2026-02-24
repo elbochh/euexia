@@ -1,26 +1,36 @@
 import type { NextConfig } from 'next';
 
-// Parse allowed image hostnames from environment.
-// NEXT_PUBLIC_API_URL is e.g. "https://my-env.us-east-1.elasticbeanstalk.com"
-const extraImageHostnames: string[] = [];
-if (process.env.NEXT_PUBLIC_API_URL) {
-  try {
-    extraImageHostnames.push(new URL(process.env.NEXT_PUBLIC_API_URL).hostname);
-  } catch { /* ignore malformed URL */ }
-}
+// BACKEND_URL is the internal EB URL used server-side for the API proxy rewrite.
+// It is NOT exposed to the browser — only used by Next.js on the server.
+// Example: http://euexia-backend-env-1.eba-8trr2mdg.us-east-2.elasticbeanstalk.com
+const BACKEND_URL =
+  process.env.BACKEND_URL ||
+  process.env.NEXT_PUBLIC_API_URL?.replace(/\/api\/?$/, '') ||
+  'http://localhost:8080';
 
 const nextConfig: NextConfig = {
   reactStrictMode: true,
+
+  // Proxy all /api/* requests through Next.js so the browser never calls EB directly.
+  // The browser calls https://your-amplify-app.com/api/... (always HTTPS).
+  // Next.js server-side rewrites that to http://your-eb-url/api/... (server → server, no mixed content).
+  async rewrites() {
+    return [
+      {
+        source: '/api/:path*',
+        destination: `${BACKEND_URL}/api/:path*`,
+      },
+    ];
+  },
+
   images: {
     remotePatterns: [
       { protocol: 'http', hostname: 'localhost' },
       { protocol: 'https', hostname: '*.elasticbeanstalk.com' },
-      ...extraImageHostnames.map((hostname) => ({
-        protocol: 'https' as const,
-        hostname,
-      })),
+      { protocol: 'http', hostname: '*.elasticbeanstalk.com' },
     ],
   },
+
   webpack: (config, { isServer }) => {
     // Handle three.js and its examples
     if (!isServer) {
