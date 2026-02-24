@@ -1,6 +1,11 @@
 import axios from 'axios';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
+// Must be a full URL (e.g. https://your-env.elasticbeanstalk.com/api) so requests go to the backend, not the frontend.
+const raw = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
+const API_URL =
+  raw.startsWith('http://') || raw.startsWith('https://')
+    ? raw.replace(/\/+$/, '') // trim trailing slashes
+    : `https://${raw.replace(/^\/+/, '').replace(/\/+$/, '')}`;
 
 const api = axios.create({
   baseURL: API_URL,
