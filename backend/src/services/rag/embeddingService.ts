@@ -1,5 +1,12 @@
-// eslint-disable-next-line @typescript-eslint/no-require-imports
-const { pipeline } = require('@xenova/transformers');
+// @xenova/transformers is optional — removed from dependencies to avoid slow EB deploys.
+// If unavailable, embedText falls back to deterministic hash embeddings.
+let xenovaPipeline: ((task: string, model: string, opts: object) => Promise<any>) | null = null;
+try {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  xenovaPipeline = require('@xenova/transformers').pipeline;
+} catch {
+  // package not installed — hash fallback will be used
+}
 
 let embedderPromise: Promise<any> | null = null;
 
@@ -22,8 +29,9 @@ function hashToDeterministicEmbedding(text: string, dim: number): number[] {
 }
 
 async function getEmbedder() {
+  if (!xenovaPipeline) throw new Error('@xenova/transformers not installed');
   if (!embedderPromise) {
-    embedderPromise = pipeline('feature-extraction', HF_EMBED_MODEL, { quantized: true });
+    embedderPromise = xenovaPipeline('feature-extraction', HF_EMBED_MODEL, { quantized: true });
   }
   return embedderPromise;
 }
