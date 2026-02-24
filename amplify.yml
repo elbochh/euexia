@@ -1,22 +1,21 @@
 version: 1
+# Monorepo: set "Monorepo root directory" to "frontend" in Amplify Console.
+# Build runs with CWD = frontend/, so no "cd frontend" needed.
 applications:
   - frontend:
       phases:
         preBuild:
           commands:
-            - cd frontend
             - npm ci
         build:
           commands:
-            - cd frontend
             - npm run build
       artifacts:
-        # Next.js SSR output — Amplify handles .next/ natively
-        baseDirectory: frontend/.next
+        baseDirectory: .next
         files:
           - '**/*'
       cache:
         paths:
-          - frontend/node_modules/**/*
-          - frontend/.next/cache/**/*
+          - node_modules/**/*
+          - .next/cache/**/*
     appRoot: frontend
