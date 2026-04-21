@@ -7,6 +7,15 @@ dist/
 uploads/
 maps/
 
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Build caches
+*.tsbuildinfo
+
 # Keep example env files tracked
 !.env.example
 

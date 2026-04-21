@@ -6,7 +6,10 @@ import { User } from '../models/User';
 import { GameProgress } from '../models/GameProgress';
 import { AuthRequest } from '../middleware/auth';
 
-const JWT_SECRET = process.env.JWT_SECRET || 'euexia-hackathon-secret';
+if (!process.env.JWT_SECRET) {
+  throw new Error('JWT_SECRET environment variable is required');
+}
+const JWT_SECRET: string = process.env.JWT_SECRET;
 
 export const register = async (req: Request, res: Response): Promise<void> => {
   try {
