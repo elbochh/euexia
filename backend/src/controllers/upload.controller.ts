@@ -511,7 +511,7 @@ export const uploadFile = async (req: AuthRequest, res: Response): Promise<void>
       return;
     }
 
-    // For hackathon, store files locally; in production, use S3
+    // For hackathon, store files locally. Cloud Run storage is ephemeral.
     const fileUrl = `/uploads/${req.file.filename}`;
     const fileBase64 = fs.readFileSync(req.file.path).toString('base64');
 

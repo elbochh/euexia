@@ -1,11 +1,11 @@
-// @xenova/transformers is optional — removed from dependencies to avoid slow EB deploys.
+// @xenova/transformers is optional and not installed in the lean deployment.
 // If unavailable, embedText falls back to deterministic hash embeddings.
 let xenovaPipeline: ((task: string, model: string, opts: object) => Promise<any>) | null = null;
 try {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   xenovaPipeline = require('@xenova/transformers').pipeline;
 } catch {
-  // package not installed — hash fallback will be used
+  // Package not installed; hash fallback will be used.
 }
 
 let embedderPromise: Promise<any> | null = null;
@@ -79,4 +79,3 @@ export async function embedText(text: string): Promise<number[]> {
     return hashToDeterministicEmbedding(safe, DEFAULT_EMBED_DIM);
   }
 }
-

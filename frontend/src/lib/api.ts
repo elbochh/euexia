@@ -1,11 +1,10 @@
 import axios from 'axios';
 
-// In production (Amplify), requests go to /api/* which Next.js proxies to EB server-side.
-// This means the browser always talks HTTPS to Amplify — no mixed content, no CORS issues.
-// In local dev, NEXT_PUBLIC_API_URL points directly to localhost:8080/api (or 5000/api).
+// In production, requests go to /api/* and Next.js proxies them server-side.
+// In local dev, NEXT_PUBLIC_API_URL points directly to the backend.
 const API_URL =
   typeof window !== 'undefined' && process.env.NODE_ENV === 'production'
-    ? '/api'  // relative — browser → Amplify proxy → EB
+    ? '/api'
     : process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080/api';
 
 const api = axios.create({
@@ -33,9 +32,7 @@ api.interceptors.response.use(
     if (error.response?.status === 401) {
       console.error('[API] 401 Unauthorized - Token may be expired or invalid');
       if (typeof window !== 'undefined') {
-        // Clear invalid token
         localStorage.removeItem('euexia_token');
-        // Redirect to login if not already there
         if (window.location.pathname !== '/') {
           window.location.href = '/';
         }
@@ -105,4 +102,3 @@ export const chatApi = {
 };
 
 export default api;
-

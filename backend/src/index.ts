@@ -13,11 +13,11 @@ import gameRoutes from './routes/game.routes';
 import chatRoutes from './routes/chat.routes';
 
 const app = express();
-// EB AL2023 nginx proxies to 8080; use 5000 for local dev.
+// Cloud Run provides PORT; use 5000 for local dev when PORT is not set.
 const PORT = process.env.PORT || (process.env.NODE_ENV === 'production' ? 8080 : 5000);
 
 // Allowed CORS origins.
-// FRONTEND_URL is set in production (Amplify URL or custom domain).
+// FRONTEND_URL can be set in production for direct browser-to-backend calls.
 // In development, localhost:3000 / 3001 are always allowed.
 const CORS_ORIGINS: (string | RegExp)[] = [
   'http://localhost:3000',
@@ -26,8 +26,8 @@ const CORS_ORIGINS: (string | RegExp)[] = [
 if (process.env.FRONTEND_URL) {
   CORS_ORIGINS.push(process.env.FRONTEND_URL);
 }
-// Also allow any *.amplifyapp.com subdomain automatically
-CORS_ORIGINS.push(/https:\/\/.*\.amplifyapp\.com$/);
+// Also allow Cloud Run frontend URLs automatically.
+CORS_ORIGINS.push(/https:\/\/.*\.run\.app$/);
 
 app.use(cors({
   origin: CORS_ORIGINS,
