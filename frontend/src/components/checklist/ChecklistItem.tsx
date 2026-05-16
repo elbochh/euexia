@@ -90,7 +90,7 @@ export default function ChecklistItem({ item, index, onComplete }: ChecklistItem
   const todLabel = timeOfDayLabel(item.timeOfDay);
 
   // Card styling based on state
-  let cardClass = 'game-card flex items-start gap-3 mb-3 relative overflow-hidden';
+  let cardClass = 'game-card group flex items-start gap-3 mb-3 relative overflow-hidden transition-all hover:-translate-y-0.5';
   if (isFullyDone) {
     cardClass += ' opacity-50';
   } else if (isExpired) {
@@ -112,7 +112,7 @@ export default function ChecklistItem({ item, index, onComplete }: ChecklistItem
   } else if (item.isCompleted) {
     buttonClass += ' bg-green-500/20 border-green-500/50';
   } else {
-    buttonClass += ' bg-game-bg border-blue-500/30 hover:border-blue-500/60 hover:bg-blue-500/10 active:scale-90';
+    buttonClass += ' bg-slate-950/70 border-cyan-400/30 hover:border-cyan-300/70 hover:bg-cyan-400/10 active:scale-90';
   }
 
   return (
@@ -124,7 +124,10 @@ export default function ChecklistItem({ item, index, onComplete }: ChecklistItem
     >
       {/* Lock / Cooldown overlay stripe */}
       {(isLocked || isOnCooldown) && countdown > 0 && (
-        <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-orange-500/60 via-yellow-500/60 to-orange-500/60" />
+        <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-orange-500/60 via-yellow-300/70 to-orange-500/60" />
+      )}
+      {!isLocked && !isOnCooldown && !isExpired && !isFullyDone && (
+        <div className="absolute inset-x-5 top-0 h-px bg-gradient-to-r from-transparent via-cyan-200/55 to-transparent opacity-0 transition-opacity group-hover:opacity-100" />
       )}
 
       {/* Complete / Status Button */}

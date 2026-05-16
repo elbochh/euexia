@@ -22,44 +22,48 @@ export default function TopBar() {
     <motion.div
       initial={{ y: -60 }}
       animate={{ y: 0 }}
-      className="fixed top-0 left-0 right-0 z-50 px-3 pt-2 pb-1"
-      style={{
-        background: 'linear-gradient(180deg, rgba(22,33,62,0.98) 0%, rgba(22,33,62,0.85) 100%)',
-        backdropFilter: 'blur(10px)',
-      }}
+      className="fixed left-0 right-0 top-0 z-50 px-3 pb-2 pt-2"
     >
-      <div className="max-w-lg mx-auto flex items-center gap-2">
+      <div className="quest-shell">
+        <div className="relative overflow-hidden rounded-[1.7rem] border border-white/10 bg-slate-950/70 px-3 py-2 shadow-2xl shadow-slate-950/45 backdrop-blur-xl">
+          <div className="absolute inset-x-8 top-0 h-px bg-gradient-to-r from-transparent via-cyan-200/60 to-transparent" />
+          <div className="flex items-center gap-2.5">
         {/* Level Badge */}
-        <div className="level-badge text-xs flex-shrink-0">
-          {progress?.level || 1}
+        <div className="relative flex-shrink-0">
+          <div className="absolute inset-0 rounded-full bg-orange-300/30 blur-md" />
+          <div className="level-badge relative h-11 w-11 text-sm">
+            {progress?.level || 1}
+          </div>
         </div>
 
         {/* XP Bar */}
         <div className="flex-1 min-w-0">
-          <div className="flex items-center justify-between text-[10px] mb-0.5">
-            <span className="text-purple-300 font-semibold truncate">
+          <div className="mb-1 flex items-center justify-between gap-2 text-[10px]">
+            <span className="truncate font-bold uppercase tracking-wide text-cyan-100">
               {user?.name || 'Player'}
             </span>
-            <span className="text-purple-300">
+            <span className="rounded-full bg-violet-400/15 px-2 py-0.5 font-bold text-violet-100">
               {progress?.xp || 0} XP
             </span>
           </div>
-          <div className="h-2.5 bg-gray-800 rounded-full overflow-hidden border border-purple-900/50">
+          <div className="relative h-3 overflow-hidden rounded-full border border-white/10 bg-slate-950/80">
             <motion.div
               className="h-full rounded-full"
               style={{
-                background: 'linear-gradient(90deg, #7c3aed, #a78bfa)',
+                background: 'linear-gradient(90deg, #22c55e, #38bdf8, #a78bfa)',
+                boxShadow: '0 0 18px rgba(56,189,248,0.5)',
               }}
               initial={{ width: 0 }}
               animate={{ width: `${Math.min(levelPct, 100)}%` }}
               transition={{ duration: 0.8, ease: 'easeOut' }}
             />
+            <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(110deg,transparent,rgba(255,255,255,0.22),transparent)] opacity-50" />
           </div>
         </div>
 
         {/* Coins */}
-        <div className="coin-badge text-xs flex-shrink-0">
-          <span className="text-base">🪙</span>
+        <div className="coin-badge h-10 flex-shrink-0 px-3 text-xs">
+          <span className="text-sm">🪙</span>
           {progress?.coins || 0}
         </div>
 
@@ -85,6 +89,8 @@ export default function TopBar() {
             className="object-contain"
           />
         </button>
+          </div>
+        </div>
       </div>
     </motion.div>
   );

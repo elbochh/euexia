@@ -146,24 +146,26 @@ export default function ChecklistView() {
   return (
     <div>
       {/* Progress Bar */}
-      <div className="game-card mb-4">
+      <div className="game-card mb-4 overflow-hidden">
+        <div className="absolute inset-x-5 top-0 h-px bg-gradient-to-r from-transparent via-emerald-200/50 to-transparent" />
         <div className="flex items-center justify-between mb-2">
-          <span className="text-sm font-semibold">Quest Progress</span>
-          <span className="text-sm text-blue-300">
+          <span className="text-sm font-black text-white">Quest Progress</span>
+          <span className="soft-badge text-emerald-100">
             {totalDone}/{checklist.length}
           </span>
         </div>
-        <div className="h-3 bg-gray-800 rounded-full overflow-hidden">
+        <div className="h-3.5 bg-slate-950/70 rounded-full overflow-hidden border border-white/10">
           <motion.div
             className="h-full rounded-full"
             style={{
-              background: 'linear-gradient(90deg, #4ade80, #22c55e)',
+              background: 'linear-gradient(90deg, #34d399, #38bdf8, #a78bfa)',
+              boxShadow: '0 0 18px rgba(56,189,248,0.45)',
             }}
             animate={{ width: `${progress}%` }}
             transition={{ duration: 0.8 }}
           />
         </div>
-        <div className="text-center mt-1 text-xs text-gray-500">{progress}% Complete</div>
+        <div className="text-center mt-2 text-xs font-semibold text-slate-400">{progress}% Complete</div>
       </div>
 
       {/* Available Now */}

@@ -28,18 +28,21 @@ export default function ChecklistPage() {
   }, [isAuthenticated]);
 
   return (
-    <div className="min-h-screen pb-20 pt-14">
+    <div className="app-screen min-h-screen pb-24 pt-20">
       <TopBar />
       <RewardPopup />
 
-      <div className="max-w-lg mx-auto px-3 mt-2">
+      <div className="quest-shell px-3 mt-2">
         <motion.div
           initial={{ opacity: 0, y: -10 }}
           animate={{ opacity: 1, y: 0 }}
-          className="text-center mb-4"
+          className="glass-panel mb-4 px-4 py-5 text-center"
         >
-          <h2 className="text-xl font-bold">⚔️ Quest Board</h2>
-          <p className="text-gray-500 text-xs">Complete quests to earn XP and coins</p>
+          <div className="mx-auto mb-2 grid h-12 w-12 place-items-center rounded-2xl bg-emerald-400/15 text-3xl">
+            ⚔️
+          </div>
+          <h2 className="section-title text-xl">Quest Board</h2>
+          <p className="text-slate-400 text-xs">Complete quests to earn XP, coins, and streaks</p>
         </motion.div>
 
         <ChecklistView />

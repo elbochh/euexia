@@ -30,17 +30,17 @@ export default function LeaderboardPage() {
   const medalEmojis = ['🥇', '🥈', '🥉'];
 
   return (
-    <div className="min-h-screen pb-20 pt-14">
+    <div className="app-screen min-h-screen pb-24 pt-20">
       <TopBar />
 
-      <div className="max-w-lg mx-auto px-3 mt-2">
+      <div className="quest-shell px-3 mt-2">
         <motion.div
           initial={{ opacity: 0, y: -10 }}
           animate={{ opacity: 1, y: 0 }}
-          className="text-center mb-6"
+          className="glass-panel mb-6 px-4 py-5 text-center"
         >
-          <div className="text-4xl mb-2">🏆</div>
-          <h2 className="text-xl font-bold">Leaderboard</h2>
+          <div className="mx-auto mb-2 grid h-14 w-14 place-items-center rounded-3xl bg-amber-400/15 text-4xl">🏆</div>
+          <h2 className="section-title text-xl">Leaderboard</h2>
           {userRank > 0 && (
             <p className="text-blue-300 text-sm mt-1">
               Your rank: #{userRank}

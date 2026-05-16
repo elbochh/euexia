@@ -78,22 +78,27 @@ export default function ConsultationsList() {
   };
 
   return (
-    <div className="min-h-screen pb-20 pt-14 bg-gradient-to-b from-gray-900 to-gray-800">
-      <div className="max-w-2xl mx-auto px-4 py-6">
+    <div className="app-screen min-h-screen pb-24 pt-20">
+      <div className="quest-shell px-4 py-4">
         <motion.div
           initial={{ opacity: 0, y: -20 }}
           animate={{ opacity: 1, y: 0 }}
-          className="mb-6"
+          className="glass-panel mb-5 px-4 py-5"
         >
-          <h1 className="text-2xl font-bold text-white mb-2">My Consultations</h1>
-          <p className="text-gray-400 text-sm">Select a consultation to view its map and checklist</p>
+          <div className="mb-3 flex items-center gap-3">
+            <div className="grid h-12 w-12 place-items-center rounded-2xl bg-cyan-400/15 text-3xl">🗺️</div>
+            <div>
+              <h1 className="section-title text-2xl">Quest Routes</h1>
+              <p className="text-gray-400 text-sm">Pick a consultation to jump back into its map.</p>
+            </div>
+          </div>
         </motion.div>
 
         {consultations.length === 0 ? (
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
-            className="text-center py-12"
+            className="glass-panel text-center py-12"
           >
             <div className="text-6xl mb-4">🗺️</div>
             <p className="text-gray-400 mb-6">No consultations yet</p>
@@ -122,10 +127,11 @@ export default function ConsultationsList() {
                     exit={{ opacity: 0, x: -100, height: 0, marginBottom: 0 }}
                     transition={{ delay: index * 0.05 }}
                     onClick={() => handleSelectConsultation(consultation)}
-                    className={`game-card p-4 cursor-pointer hover:scale-[1.02] transition-transform relative ${
+                    className={`game-card group relative cursor-pointer overflow-hidden p-4 transition-all hover:-translate-y-1 hover:border-cyan-300/30 ${
                       isDeleting ? 'pointer-events-none' : ''
                     }`}
                   >
+                    <div className="absolute inset-x-4 top-0 h-px bg-gradient-to-r from-transparent via-cyan-200/50 to-transparent opacity-0 transition-opacity group-hover:opacity-100" />
                     <div className="flex items-start justify-between">
                       <div className="flex-1 min-w-0 pr-3">
                         <div className="flex items-center gap-2 mb-2">

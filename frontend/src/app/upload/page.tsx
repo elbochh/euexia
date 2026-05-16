@@ -213,10 +213,10 @@ Follow-up: Return if symptoms persist beyond day 3.`;
   };
 
   return (
-    <div className="min-h-screen pb-20 pt-14">
+    <div className="app-screen min-h-screen pb-24 pt-20">
       <TopBar />
 
-      <div className="max-w-lg mx-auto px-3 mt-2">
+      <div className="quest-shell px-3 mt-2">
         <AnimatePresence mode="wait">
           {/* Step 1: Select upload types */}
           {step === 'select' && (
@@ -226,11 +226,11 @@ Follow-up: Return if symptoms persist beyond day 3.`;
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -20 }}
             >
-              <div className="text-center mb-6">
-                <div className="text-5xl mb-3">📋</div>
-                <h2 className="text-xl font-bold">New Consultation</h2>
+              <div className="glass-panel mb-5 px-4 py-5 text-center">
+                <div className="mx-auto mb-3 grid h-14 w-14 place-items-center rounded-3xl bg-cyan-400/15 text-4xl">📋</div>
+                <h2 className="section-title text-xl">New Consultation</h2>
                 <p className="text-gray-400 text-sm mt-1">
-                  What would you like to upload?
+                  Upload notes and Gemma will forge your quest route.
                 </p>
               </div>
 
@@ -239,9 +239,7 @@ Follow-up: Return if symptoms persist beyond day 3.`;
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
                 placeholder="Consultation title"
-                className="w-full px-4 py-3 rounded-xl bg-game-panel border border-blue-500/30
-                  text-white placeholder-gray-500 focus:outline-none focus:border-blue-500/60
-                  mb-4 text-sm"
+                className="input-game mb-4"
               />
 
               <div className="grid grid-cols-2 gap-3 mb-6">
@@ -250,9 +248,9 @@ Follow-up: Return if symptoms persist beyond day 3.`;
                     key={ut.type}
                     whileTap={{ scale: 0.95 }}
                     onClick={() => toggleType(ut.type)}
-                    className={`game-card text-center py-5 transition-all ${
+                    className={`game-card relative text-center py-5 transition-all hover:-translate-y-1 ${
                       selectedTypes.has(ut.type)
-                        ? 'border-green-500/50 bg-green-500/10'
+                        ? 'border-green-400/50 bg-green-500/10 shadow-emerald-500/15'
                         : ''
                     }`}
                   >

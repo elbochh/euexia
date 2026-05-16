@@ -334,12 +334,55 @@ export default function GameCanvas({
 
       // ── Background ─────────────────────────────────────────────────────────
       const skyBg = new Graphics();
-      skyBg.rect(0, 0, width, height);
-      skyBg.fill(0x5b7fa6);
+      const bands = 9;
+      for (let i = 0; i < bands; i += 1) {
+        const t = i / Math.max(1, bands - 1);
+        const r = Math.round(42 + t * 35);
+        const g = Math.round(87 + t * 44);
+        const b = Math.round(126 + t * 54);
+        skyBg.rect(0, (height / bands) * i, width, height / bands + 1);
+        skyBg.fill((r << 16) + (g << 8) + b);
+      }
+      skyBg.rect(0, height * 0.68, width, height * 0.32);
+      skyBg.fill({ color: 0x3f6f9e, alpha: 0.42 });
       app.stage.addChildAt(skyBg, 0);
+
+      const atmosphere = new Graphics();
+      atmosphere.circle(width * 0.16, height * 0.12, Math.max(70, width * 0.24));
+      atmosphere.fill({ color: 0xfef3c7, alpha: 0.16 });
+      atmosphere.circle(width * 0.86, height * 0.24, Math.max(110, width * 0.34));
+      atmosphere.fill({ color: 0x7dd3fc, alpha: 0.11 });
+      atmosphere.circle(width * 0.52, height * 0.88, Math.max(130, width * 0.42));
+      atmosphere.fill({ color: 0x22c55e, alpha: 0.08 });
+      app.stage.addChildAt(atmosphere, 1);
+
+      const cloudLayer = new Graphics();
+      for (let i = 0; i < 7; i += 1) {
+        const cx = (width * (0.1 + i * 0.16)) % (width + 80) - 40;
+        const cy = height * (0.12 + (i % 3) * 0.14);
+        cloudLayer.ellipse(cx, cy, 44 + (i % 2) * 18, 13 + (i % 3) * 3);
+        cloudLayer.fill({ color: 0xffffff, alpha: 0.08 });
+      }
+      app.stage.addChildAt(cloudLayer, 2);
 
       // ── Tile rendering ─────────────────────────────────────────────────────
       const tileLayer = new Container();
+      const islandShadow = new Graphics();
+      for (let row = 0; row < GRID_ROWS; row += 2) {
+        const [left, right] = bounds[row];
+        const leftPos = hexPos(row, left);
+        const rightPos = hexPos(row, right);
+        islandShadow.roundRect(
+          leftPos.x - tileW * 0.7,
+          leftPos.y + tileH * 0.18,
+          rightPos.x - leftPos.x + tileW * 1.35,
+          rowStep * 2.3,
+          tileH * 0.2
+        );
+        islandShadow.fill({ color: 0x082f49, alpha: 0.08 });
+      }
+      tileLayer.addChild(islandShadow);
+
       for (let row = 0; row < GRID_ROWS; row++) {
         for (let col = 0; col < GRID_COLS; col++) {
           const cell = ISLAND[row]?.[col];
@@ -374,6 +417,20 @@ export default function GameCanvas({
       }
       scrollContainer.addChild(tileLayer);
 
+      const riverSparkleLayer = new Graphics();
+      for (let row = 1; row < GRID_ROWS - 1; row += 3) {
+        const rc = riverCol[row];
+        const { x, y } = hexPos(row, rc);
+        const drift = (hash(row * 91, rc * 37) - 0.5) * tileW * 0.45;
+        riverSparkleLayer.ellipse(x + drift, y - tileH * 0.08, tileW * 0.18, tileH * 0.035);
+        riverSparkleLayer.fill({ color: 0xe0f2fe, alpha: 0.28 });
+        if (row % 6 === 1) {
+          riverSparkleLayer.ellipse(x + tileW * 0.34, y + tileH * 0.06, tileW * 0.12, tileH * 0.025);
+          riverSparkleLayer.fill({ color: 0xbae6fd, alpha: 0.20 });
+        }
+      }
+      scrollContainer.addChild(riverSparkleLayer);
+
       // ── Decorations ────────────────────────────────────────────────────────
       const decorLayer = new Container();
       for (let row = 0; row < GRID_ROWS; row++) {
@@ -392,7 +449,7 @@ export default function GameCanvas({
           let cap = 0;
 
           if (type === _G) {
-            cap = elev >= 2 ? 0.30 : 0.22;
+            cap = elev >= 2 ? 0.38 : 0.28;
             if (h2 < 0.08) { propTex = texTreeGreenHigh; sc = 1.2; }
             else if (h2 < 0.15) { propTex = texPineGreenMid; sc = 1.05; }
             else if (h2 < 0.22) { propTex = texTreeGreenLow; sc = 0.9; }
@@ -403,13 +460,13 @@ export default function GameCanvas({
             else if (h2 < 0.84) { propTex = texSmallRockGrass; sc = 0.45; }
             else { propTex = texHillGrass; sc = 0.50; }
           } else if (type === _S) {
-            cap = 0.22;
+            cap = 0.28;
             if (h2 < 0.2) { propTex = texCactus1; sc = 0.8; }
             else if (h2 < 0.4) { propTex = texBushSand; sc = 0.50; }
             else if (h2 < 0.65) { propTex = texSmallRockDirt; sc = 0.40; }
             else { propTex = texHillSand; sc = 0.50; }
           } else if (type === _N) {
-            cap = 0.25;
+            cap = 0.32;
             if (h2 < 0.12) { propTex = texPineBlueHigh; sc = 1.15; }
             else if (h2 < 0.22) { propTex = texPineBlueMid; sc = 1.0; }
             else if (h2 < 0.38) { propTex = texRockSnow1; sc = 0.70; }
@@ -418,19 +475,19 @@ export default function GameCanvas({
             else if (h2 < 0.84) { propTex = texBushSnow; sc = 0.50; }
             else { propTex = texHillSnow; sc = 0.50; }
           } else if (type === _T) {
-            cap = 0.20;
+            cap = 0.25;
             if (h2 < 0.30) { propTex = texRockStone; sc = 0.60; }
             else if (h2 < 0.55) { propTex = texRockStoneMoss1; sc = 0.55; }
             else if (h2 < 0.80) { propTex = texSmallRockStone; sc = 0.45; }
             else { propTex = texPineBlueLow; sc = 0.75; }
           } else if (type === _D) {
-            cap = 0.18;
+            cap = 0.24;
             if (h2 < 0.30) { propTex = texRockDirtMoss1; sc = 0.50; }
             else if (h2 < 0.55) { propTex = texSmallRockDirt; sc = 0.42; }
             else if (h2 < 0.80) { propTex = texBushAutumn; sc = 0.48; }
             else { propTex = texRockDirt; sc = 0.50; }
           } else if (type === _A) {
-            cap = 0.24;
+            cap = 0.32;
             if (h2 < 0.10) { propTex = texTreeAutumnMid; sc = 1.0; }
             else if (h2 < 0.18) { propTex = texPineAutumnMid; sc = 0.95; }
             else if (h2 < 0.25) { propTex = texTreeAutumnLow; sc = 0.80; }
@@ -530,9 +587,9 @@ export default function GameCanvas({
           const t = j / numDots;
           const bx = bezier(p1.x, cpx, p2.x, t);
           const by = bezier(p1.y, cpy, p2.y, t);
-          pathGfx.circle(bx, by + 1.5, 5);   pathGfx.fill({ color: 0x000000, alpha: 0.25 });
-          pathGfx.circle(bx, by, 4.5);        pathGfx.fill({ color: 0xffffff, alpha: 0.95 });
-          pathGfx.circle(bx, by - 1.5, 2.8);  pathGfx.fill({ color: 0xf0f9ff, alpha: 0.5 });
+          pathGfx.circle(bx, by + 2.2, 7);    pathGfx.fill({ color: 0x020617, alpha: 0.28 });
+          pathGfx.circle(bx, by + 0.5, 5.4);  pathGfx.fill({ color: 0xffffff, alpha: 0.96 });
+          pathGfx.circle(bx, by - 1.6, 3.1);  pathGfx.fill({ color: 0xdff7ff, alpha: 0.7 });
         }
 
         const segIdx = i - 1;
@@ -541,8 +598,9 @@ export default function GameCanvas({
             const t = j / numDots;
             const bx = bezier(p1.x, cpx, p2.x, t);
             const by = bezier(p1.y, cpy, p2.y, t);
-            progressGfx.circle(bx, by, 4.5);       progressGfx.fill({ color: 0x4ade80, alpha: 1 });
-            progressGfx.circle(bx, by - 1.5, 2.8); progressGfx.fill({ color: 0x86efac, alpha: 0.7 });
+            progressGfx.circle(bx, by + 0.5, 6.0); progressGfx.fill({ color: 0x064e3b, alpha: 0.42 });
+            progressGfx.circle(bx, by, 5.1);       progressGfx.fill({ color: 0x34d399, alpha: 1 });
+            progressGfx.circle(bx, by - 1.7, 3.0); progressGfx.fill({ color: 0xbbf7d0, alpha: 0.85 });
           }
         }
       }
@@ -585,14 +643,30 @@ export default function GameCanvas({
         checkpoint.addChild(shadow);
         (checkpoint as any)._shadow = shadow;
 
+        const pedestal = new Graphics();
+        pedestal.circle(0, -TOKEN_H * 0.25, TOKEN_H * 0.47);
+        pedestal.fill({
+          color: isStarCompleted ? 0x10b981 : isLocked ? 0x334155 : 0x0ea5e9,
+          alpha: isLocked ? 0.14 : 0.18,
+        });
+        pedestal.circle(0, -TOKEN_H * 0.25, TOKEN_H * 0.36);
+        pedestal.fill({ color: 0xffffff, alpha: isLocked ? 0.05 : 0.09 });
+        checkpoint.addChild(pedestal);
+
         // Glow ring for current active coin
         if (isCurrent && !isLocked) {
           const glowG = new Graphics();
-          glowG.circle(0, -TOKEN_H * 0.42, TOKEN_H * 0.56); glowG.fill({ color: 0xfbbf24, alpha: 0.16 });
-          glowG.circle(0, -TOKEN_H * 0.42, TOKEN_H * 0.46); glowG.fill({ color: 0xfbbf24, alpha: 0.28 });
+          glowG.circle(0, -TOKEN_H * 0.42, TOKEN_H * 0.66); glowG.fill({ color: 0xfbbf24, alpha: 0.14 });
+          glowG.circle(0, -TOKEN_H * 0.42, TOKEN_H * 0.52); glowG.fill({ color: 0x38bdf8, alpha: 0.20 });
+          glowG.circle(0, -TOKEN_H * 0.42, TOKEN_H * 0.42); glowG.fill({ color: 0xfef3c7, alpha: 0.18 });
           checkpoint.addChildAt(glowG, 0);
           (checkpoint as any)._isCurrentGlow = glowG;
           (checkpoint as any)._isCurrent = true;
+        } else if (isStarCompleted) {
+          const completeGlow = new Graphics();
+          completeGlow.circle(0, -TOKEN_H * 0.42, TOKEN_H * 0.5);
+          completeGlow.fill({ color: 0x34d399, alpha: 0.16 });
+          checkpoint.addChildAt(completeGlow, 0);
         }
 
         // Coin sprite — tinted by state
@@ -640,6 +714,10 @@ export default function GameCanvas({
 
         // Day label + coin progress under each star
         const labelY = cy + COIN_R + 22;
+        const labelBg = new Graphics();
+        labelBg.roundRect(cx - 37, labelY - 10, 74, totalStarCoins > 0 ? 32 : 20, 10);
+        labelBg.fill({ color: 0x020617, alpha: 0.56 });
+        labelBg.stroke({ color: isStarCompleted ? 0x34d399 : isLocked ? 0x64748b : 0x38bdf8, width: 1, alpha: 0.36 });
         const dayLabelStroke = new Text({
           text: `Day ${index + 1}`,
           style: new TextStyle({
@@ -675,7 +753,7 @@ export default function GameCanvas({
         coinsLabel.anchor.set(0.5);
         coinsLabel.position.set(cx, labelY + 14);
 
-        scrollContainer.addChild(dayLabelStroke, dayLabelFill, coinsLabel);
+        scrollContainer.addChild(labelBg, dayLabelStroke, dayLabelFill, coinsLabel);
         floatingCoins.push({ container: checkpoint, baseY: cy, phaseOffset: index * 0.62 });
       }
       scrollContainer.addChild(checkpointContainer);
@@ -1098,8 +1176,11 @@ export default function GameCanvas({
   return (
     <div
       ref={containerRef}
-      className="w-full h-full overflow-hidden"
-      style={{ background: '#5b7fa6' }}
+      className="h-full w-full overflow-hidden rounded-t-[2rem] shadow-inner"
+      style={{
+        background:
+          'radial-gradient(circle at 20% 10%, rgba(186,230,253,0.22), transparent 18rem), linear-gradient(180deg, #446f9b 0%, #5b8db5 100%)',
+      }}
     />
   );
 }

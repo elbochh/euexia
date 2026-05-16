@@ -3,11 +3,11 @@ import { usePathname, useRouter } from 'next/navigation';
 import { motion } from 'framer-motion';
 
 const navItems = [
-  { path: '/dashboard', label: 'Map', icon: '🗺️' },
-  { path: '/consultations', label: 'Consultations', icon: '📋' },
-  { path: '/upload', label: 'Upload', icon: '📤' },
-  { path: '/checklist', label: 'Tasks', icon: '✅' },
-  { path: '/leaderboard', label: 'Rank', icon: '🏆' },
+  { path: '/dashboard', label: 'Map', icon: '🗺️', accent: 'from-emerald-400 to-cyan-400' },
+  { path: '/consultations', label: 'Logs', icon: '📋', accent: 'from-sky-400 to-blue-500' },
+  { path: '/upload', label: 'Upload', icon: '📤', accent: 'from-orange-300 to-amber-500' },
+  { path: '/checklist', label: 'Quests', icon: '✅', accent: 'from-lime-300 to-emerald-500' },
+  { path: '/leaderboard', label: 'Rank', icon: '🏆', accent: 'from-fuchsia-300 to-violet-500' },
 ];
 
 export default function BottomNav() {
@@ -18,29 +18,33 @@ export default function BottomNav() {
     <motion.nav
       initial={{ y: 80 }}
       animate={{ y: 0 }}
-      className="fixed bottom-0 left-0 right-0 z-50 pb-safe"
-      style={{
-        background: 'linear-gradient(0deg, rgba(22,33,62,0.98) 0%, rgba(22,33,62,0.9) 100%)',
-        backdropFilter: 'blur(10px)',
-      }}
+      className="fixed bottom-0 left-0 right-0 z-50 px-3 pb-3"
     >
-      <div className="max-w-lg mx-auto flex items-center justify-around py-2 px-2">
+      <div className="quest-shell">
+        <div className="relative flex items-center justify-around rounded-[2rem] border border-white/10 bg-slate-950/78 px-2 py-2 shadow-2xl shadow-slate-950/50 backdrop-blur-xl">
+          <div className="absolute inset-x-10 top-0 h-px bg-gradient-to-r from-transparent via-white/45 to-transparent" />
         {navItems.map((item) => {
           const isActive = pathname === item.path;
           return (
             <button
               key={item.path}
               onClick={() => router.push(item.path)}
-              className={`flex flex-col items-center gap-0.5 px-4 py-1.5 rounded-xl transition-all ${
+              className={`relative flex min-w-0 flex-1 flex-col items-center gap-1 rounded-2xl px-1 py-2 transition-all ${
                 isActive
-                  ? 'bg-blue-600/20 scale-110'
-                  : 'opacity-60 hover:opacity-100'
+                  ? 'scale-[1.04] text-white'
+                  : 'text-slate-500 opacity-80 hover:bg-white/5 hover:text-slate-200'
               }`}
             >
-              <span className="text-2xl">{item.icon}</span>
+              {isActive && (
+                <motion.div
+                  layoutId="navActiveBubble"
+                  className={`absolute inset-1 rounded-2xl bg-gradient-to-b ${item.accent} opacity-95 shadow-lg shadow-cyan-500/15`}
+                />
+              )}
+              <span className="relative text-2xl leading-none drop-shadow">{item.icon}</span>
               <span
-                className={`text-[10px] font-semibold ${
-                  isActive ? 'text-blue-300' : 'text-gray-400'
+                className={`relative text-[10px] font-black leading-none ${
+                  isActive ? 'text-white' : 'text-slate-500'
                 }`}
               >
                 {item.label}
@@ -48,12 +52,13 @@ export default function BottomNav() {
               {isActive && (
                 <motion.div
                   layoutId="navIndicator"
-                  className="absolute -bottom-0.5 w-8 h-1 rounded-full bg-blue-500"
+                  className="absolute -bottom-1 h-1 w-9 rounded-full bg-white/80"
                 />
               )}
             </button>
           );
         })}
+        </div>
       </div>
     </motion.nav>
   );
