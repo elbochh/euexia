@@ -52,7 +52,7 @@ async function invokeGemmaChat(
   messages: Array<{ role: 'system' | 'user' | 'assistant'; content: any }>,
   options?: TextGenerationOptions
 ): Promise<ModelResponse> {
-  const model = process.env.GOOGLE_VERTEX_MODEL || 'gemma-4-26b-a4b-it-maas';
+  const model = process.env.GOOGLE_VERTEX_MODEL || 'google/gemma-4-26b-a4b-it-maas';
   const token = await getVertexAccessToken();
 
   const response = await fetch(getVertexEndpoint(), {
