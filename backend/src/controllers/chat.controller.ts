@@ -2,7 +2,7 @@ import { Response } from 'express';
 import { AuthRequest } from '../middleware/auth';
 import { ChatMessage } from '../models/ChatMessage';
 import { retrieveContext, estimateChatRequestTokens } from '../services/rag/retriever';
-import { generateChatResponse } from '../services/rag/langchainMedGemma';
+import { generateChatResponse } from '../services/rag/langchainGemma';
 import { condenseQuestion } from '../services/rag/questionCondenser';
 import { indexChatMessageChunk } from '../services/rag/indexer';
 

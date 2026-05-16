@@ -1,4 +1,4 @@
-import { invokeTextModel } from '../sagemaker';
+import { invokeTextModel } from '../googleGemma';
 
 export interface ChecklistItemData {
   title: string;

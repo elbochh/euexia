@@ -6,7 +6,7 @@ import {
   ValidationResult,
 } from './types';
 import { sanitizeAndValidateMapSpec } from './schema';
-import { invokeTextModel } from '../sagemaker';
+import { invokeTextModel } from '../googleGemma';
 
 type ChecklistLikeItem = {
   category?: string;
@@ -320,61 +320,28 @@ JSON shape required (output ONLY the JSON object):
 }`;
 }
 
-async function tryGenerateWithOpenAI(
+async function tryGenerateWithGemma(
   signals: ChecklistSignals,
   nodeCount: number,
   items: ChecklistLikeItem[],
   startIndex: number
 ): Promise<any | null> {
   const enabled = process.env.USE_AI_MAP_GENERATION === 'true';
-  const provider = (process.env.AI_MAP_SPEC_PROVIDER || 'openai').toLowerCase();
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (!enabled || (provider === 'openai' && !apiKey)) {
-    console.log('AI map generation disabled or no API key');
+  if (!enabled) {
+    console.log('AI map generation disabled');
     return null;
   }
 
-  const model = process.env.OPENAI_MAP_MODEL || 'gpt-4.1-mini';
-  console.log(`Generating AI map with ${provider}:${model} for ${nodeCount} nodes starting at index ${startIndex}`);
+  const model = process.env.GOOGLE_VERTEX_MODEL || 'gemma-4-26b-a4b-it-maas';
+  console.log(`Generating AI map with Gemma 4 (${model}) for ${nodeCount} nodes starting at index ${startIndex}`);
   
   try {
-    let content: string = '';
     const userPrompt = buildMapPrompt(signals, nodeCount, items, startIndex);
-    if (provider === 'sagemaker') {
-      const result = await invokeTextModel(
-        `You are a professional game map designer. Return ONLY valid JSON object.\n\n${userPrompt}`
-      );
-      content = result.text;
-    } else {
-      const response = await fetch('https://api.openai.com/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          model,
-          temperature: 0.8,
-          response_format: { type: 'json_object' },
-          messages: [
-            {
-              role: 'system',
-              content: 'You are a professional game map designer. You MUST return ONLY valid JSON. No markdown, no code blocks, no explanations, no text outside the JSON object. Just the raw JSON object starting with { and ending with }.'
-            },
-            { role: 'user', content: userPrompt },
-          ],
-        }),
-      });
-
-      if (!response.ok) {
-        const body = await response.text();
-        console.error(`OpenAI API error: ${response.status}`, body);
-        throw new Error(`OpenAI map generation failed: ${response.status} ${body}`);
-      }
-
-      const payload: any = await response.json();
-      content = payload?.choices?.[0]?.message?.content;
-    }
+    const result = await invokeTextModel(
+      `You are a professional game map designer. Return ONLY a valid JSON object.\n\n${userPrompt}`,
+      { temperature: 0.8, max_new_tokens: 2048 }
+    );
+    const content = result.text;
 
     if (typeof content !== 'string') {
       console.error('Map generation returned non-string content');
@@ -392,7 +359,7 @@ async function tryGenerateWithOpenAI(
       console.log('Successfully generated AI map');
       return parsed;
     } catch (parseError) {
-      console.error('Failed to parse OpenAI response as JSON, trying to extract JSON...', parseError);
+      console.error('Failed to parse Gemma map response as JSON, trying to extract JSON...', parseError);
       // Try to extract JSON from the response
       const match = jsonContent.match(/\{[\s\S]*\}/);
       if (match) {
@@ -401,7 +368,7 @@ async function tryGenerateWithOpenAI(
       return null;
     }
   } catch (error) {
-    console.error('OpenAI map generation error:', error);
+    console.error('Gemma map generation error:', error);
     throw error;
   }
 }
@@ -431,7 +398,7 @@ export async function generateMapSpecForChecklist(
   const fallbackPath = fallback.path;
 
   try {
-    const aiRaw = await tryGenerateWithOpenAI(signals, nodeCount, items, startIndex);
+    const aiRaw = await tryGenerateWithGemma(signals, nodeCount, items, startIndex);
     if (!aiRaw) {
       return {
         mapSpec: fallback,
@@ -514,5 +481,3 @@ export async function generateMapsForChecklist(
 
   return maps;
 }
-
-

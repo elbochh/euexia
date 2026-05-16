@@ -3,6 +3,7 @@ dist/
 .next/
 .env
 .env.local
+.secrets/
 *.log
 uploads/
 maps/

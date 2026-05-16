@@ -1,4 +1,4 @@
-import { invokeImageModel } from '../sagemaker';
+import { invokeImageModel } from '../googleGemma';
 
 /**
  * Image Agent: analyzes medical images using the configured multimodal model.

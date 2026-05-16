@@ -1,4 +1,4 @@
-import { invokeTextModel } from '../sagemaker';
+import { invokeTextModel } from '../googleGemma';
 
 /**
  * Truncate a message to a max length, cutting at last sentence boundary.

@@ -1,4 +1,4 @@
-import { invokeTextModel } from '../sagemaker';
+import { invokeTextModel } from '../googleGemma';
 
 /**
  * Text Agent: processes raw text input using the configured text model.

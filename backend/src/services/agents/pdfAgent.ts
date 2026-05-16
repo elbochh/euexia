@@ -1,4 +1,4 @@
-import { invokeTextModel, invokeImageModel } from '../sagemaker';
+import { invokeTextModel, invokeImageModel } from '../googleGemma';
 
 /**
  * PDF Agent: extracts text from PDF and processes it with the configured text model.

@@ -1,4 +1,4 @@
-import { invokeTextModel } from '../sagemaker';
+import { invokeTextModel } from '../googleGemma';
 
 /**
  * Summary Aggregator Agent: combines all individual summaries into a unified
