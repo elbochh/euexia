@@ -9,6 +9,7 @@ import BottomNav from '@/components/ui/BottomNav';
 import RewardPopup from '@/components/ui/RewardPopup';
 import CheckpointBottomOverlay from '@/components/game/CheckpointBottomOverlay';
 import DoctorChatModal from '@/components/chat/DoctorChatModal';
+import ProfileModal from '@/components/ui/ProfileModal';
 import { useGameStore } from '@/stores/gameStore';
 import { GAME_CONFIG } from '@/lib/gameConfig';
 
@@ -36,6 +37,8 @@ export default function DashboardPage() {
   const [selectedCheckpoint, setSelectedCheckpoint] = useState<number | null>(null);
   const [showDoctorChat, setShowDoctorChat] = useState(false);
   const [showConsultationSelector, setShowConsultationSelector] = useState(false);
+  const [showProfile, setShowProfile] = useState(false);
+  const [introMessage, setIntroMessage] = useState<string | undefined>(undefined);
 
   useEffect(() => {
     initFromStorage();
@@ -44,11 +47,30 @@ export default function DashboardPage() {
     (window as any).__openDoctorChat = () => {
       setShowDoctorChat(true);
     };
+    (window as any).__openProfile = () => {
+      setShowProfile(true);
+    };
     
     return () => {
       delete (window as any).__openDoctorChat;
+      delete (window as any).__openProfile;
     };
   }, []);
+
+  // One-time intro per consultation (localStorage flag)
+  useEffect(() => {
+    if (!currentMapInfo?.consultationId) return;
+    if (typeof window === 'undefined') return;
+    const key = `euexia_intro_shown_${currentMapInfo.consultationId}`;
+    if (!localStorage.getItem(key)) {
+      localStorage.setItem(key, '1');
+      setIntroMessage(
+        "There’s a long way to go, but I’ll walk with you one step at a time. Feel free to ask me anything along the path."
+      );
+    } else {
+      setIntroMessage(undefined);
+    }
+  }, [currentMapInfo?.consultationId]);
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
@@ -185,6 +207,8 @@ export default function DashboardPage() {
             eventsPerStar={mapEventsPerStar}
             onCheckpointClick={handleCheckpointClick}
             userName={user?.name}
+            playerCharacterId={progress?.selectedCharacter}
+            introMessage={introMessage}
           />
 
           {/* In-map HUD (minimal, top-left, no container) */}
@@ -363,6 +387,8 @@ export default function DashboardPage() {
         consultationId={currentConsultationId}
         onClose={() => setShowDoctorChat(false)}
       />
+
+      <ProfileModal isOpen={showProfile} onClose={() => setShowProfile(false)} />
     </div>
   );
 }

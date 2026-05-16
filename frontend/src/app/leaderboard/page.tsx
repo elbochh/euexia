@@ -1,10 +1,12 @@
-'use client';
+ 'use client';
+import Image from 'next/image';
 import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { motion } from 'framer-motion';
 import TopBar from '@/components/ui/TopBar';
 import BottomNav from '@/components/ui/BottomNav';
 import { useGameStore } from '@/stores/gameStore';
+import { DEFAULT_CHARACTER_ID, getCharacterSpriteSrc } from '@/lib/characters';
 
 export default function LeaderboardPage() {
   const router = useRouter();
@@ -54,19 +56,35 @@ export default function LeaderboardPage() {
             className="flex items-end justify-center gap-3 mb-6"
           >
             {[1, 0, 2].map((podiumIndex) => {
-              const player = leaderboard[podiumIndex];
+              const player: any = leaderboard[podiumIndex];
               if (!player) return null;
               const isFirst = podiumIndex === 0;
+              const selectedCharacter = (player.selectedCharacter as string) || DEFAULT_CHARACTER_ID;
               return (
                 <div
                   key={podiumIndex}
                   className={`text-center ${isFirst ? 'order-2' : podiumIndex === 1 ? 'order-1' : 'order-3'}`}
                 >
                   <div className="text-2xl mb-1">{medalEmojis[podiumIndex]}</div>
-                  <div
-                    className={`level-badge mx-auto mb-1 ${isFirst ? 'w-14 h-14 text-lg' : 'w-10 h-10 text-sm'}`}
-                  >
-                    {player.level || 1}
+                  <div className="mx-auto mb-1 flex flex-col items-center gap-1">
+                    <div
+                      className={`rounded-2xl overflow-hidden border border-slate-300/60 bg-slate-900 flex items-center justify-center ${
+                        isFirst ? 'w-16 h-16' : 'w-12 h-12'
+                      }`}
+                    >
+                      <Image
+                        src={getCharacterSpriteSrc(selectedCharacter as any)}
+                        alt={player.userId?.name || 'Player'}
+                        width={48}
+                        height={48}
+                        className="object-contain p-1"
+                      />
+                    </div>
+                    <div
+                      className={`level-badge text-[10px] ${isFirst ? 'w-10 h-5' : 'w-8 h-4'}`}
+                    >
+                      {player.level || 1}
+                    </div>
                   </div>
                   <p className="text-xs font-semibold truncate max-w-[80px]">
                     {player.userId?.name || 'Player'}
@@ -94,6 +112,7 @@ export default function LeaderboardPage() {
         <div className="space-y-2">
           {leaderboard.map((player: any, index: number) => {
             const isCurrentUser = player.userId?._id === user?.id;
+            const selectedCharacter = (player.selectedCharacter as string) || DEFAULT_CHARACTER_ID;
             return (
               <motion.div
                 key={player._id || index}
@@ -107,8 +126,19 @@ export default function LeaderboardPage() {
                 <div className="w-8 text-center font-bold text-sm">
                   {index < 3 ? medalEmojis[index] : `#${index + 1}`}
                 </div>
-                <div className="level-badge text-xs w-8 h-8">
-                  {player.level || 1}
+                <div className="flex flex-col items-center gap-1">
+                  <div className="w-10 h-10 rounded-2xl overflow-hidden border border-slate-300/60 bg-slate-900 flex items-center justify-center">
+                    <Image
+                      src={getCharacterSpriteSrc(selectedCharacter as any)}
+                      alt={player.userId?.name || 'Player'}
+                      width={40}
+                      height={40}
+                      className="object-contain p-1"
+                    />
+                  </div>
+                  <div className="level-badge text-[10px] w-8 h-4">
+                    {player.level || 1}
+                  </div>
                 </div>
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-semibold truncate">

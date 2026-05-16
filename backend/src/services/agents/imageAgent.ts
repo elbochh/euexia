@@ -1,7 +1,7 @@
 import { invokeImageModel } from '../sagemaker';
 
 /**
- * Image Agent: analyzes medical images using MedGemma-4b-it multimodal model.
+ * Image Agent: analyzes medical images using the configured multimodal model.
  * Extracts every detail from medical documents, prescriptions, lab reports, etc.
  */
 export async function processImage(imageBase64: string): Promise<string> {

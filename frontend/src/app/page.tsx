@@ -225,7 +225,7 @@ export default function HomePage() {
         </form>
 
         <p className="text-center text-gray-500 text-xs mt-4">
-          Powered by Google MedGemma AI
+          Powered by Google Gemma 4 AI
         </p>
       </motion.div>
 
@@ -250,4 +250,3 @@ export default function HomePage() {
     </div>
   );
 }
-

@@ -1,12 +1,22 @@
 'use client';
+
+import Image from 'next/image';
 import { motion } from 'framer-motion';
 import { useGameStore } from '@/stores/gameStore';
 import { getLevelProgress } from '@/lib/gameConfig';
+import { DEFAULT_CHARACTER_ID, getCharacterSpriteSrc } from '@/lib/characters';
 
 export default function TopBar() {
   const { progress, user } = useGameStore();
 
   const levelPct = progress ? getLevelProgress(progress.xp, progress.level) : 0;
+  const characterId = (progress?.selectedCharacter as any) || DEFAULT_CHARACTER_ID;
+
+  const handleProfileClick = () => {
+    if (typeof window !== 'undefined' && (window as any).__openProfile) {
+      (window as any).__openProfile();
+    }
+  };
 
   return (
     <motion.div
@@ -60,8 +70,24 @@ export default function TopBar() {
             <span className="text-orange-300 text-xs font-bold">{progress?.streak}</span>
           </div>
         )}
+
+        {/* Profile avatar */}
+        <button
+          type="button"
+          onClick={handleProfileClick}
+          className="ml-1 w-9 h-9 rounded-2xl overflow-hidden border border-slate-400/60 bg-slate-900 flex-shrink-0 flex items-center justify-center hover:scale-[1.03] hover:border-blue-400 transition"
+        >
+          <Image
+            src={getCharacterSpriteSrc(characterId)}
+            alt="Profile character"
+            width={32}
+            height={32}
+            className="object-contain"
+          />
+        </button>
       </div>
     </motion.div>
   );
 }
+
 

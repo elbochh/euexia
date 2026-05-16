@@ -18,6 +18,83 @@ export const getProgress = async (req: AuthRequest, res: Response): Promise<void
   }
 };
 
+// Simple price table for character cosmetics (coins)
+const CHARACTER_PRICES: Record<string, number> = {
+  'character-a': 0,   // default
+  'character-b': 15,  // easy (2–3 tasks)
+  'character-c': 30,  // easy/medium
+  'character-d': 75,  // medium
+  'character-e': 150, // hard
+  'character-f': 300, // very expensive
+};
+
+export const purchaseCharacter = async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const userId = req.userId!;
+    const { characterId } = req.body as { characterId?: string };
+
+    if (!characterId) {
+      res.status(400).json({ error: 'characterId is required' });
+      return;
+    }
+
+    const price = CHARACTER_PRICES[characterId];
+    if (price === undefined) {
+      res.status(400).json({ error: 'Unknown characterId' });
+      return;
+    }
+
+    const progress = await getOrCreateProgress(userId);
+    if (!progress.ownedCharacters) progress.ownedCharacters = ['character-a'];
+
+    // If already owned, just equip without charging again.
+    if (!progress.ownedCharacters.includes(characterId)) {
+      if (progress.coins < price) {
+        res.status(400).json({ error: 'not_enough_coins' });
+        return;
+      }
+      progress.coins -= price;
+      progress.ownedCharacters.push(characterId);
+    }
+
+    progress.selectedCharacter = characterId;
+    await progress.save();
+
+    res.json({ progress });
+  } catch (error) {
+    console.error('purchaseCharacter error:', error);
+    res.status(500).json({ error: 'Failed to purchase character' });
+  }
+};
+
+export const selectCharacter = async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const userId = req.userId!;
+    const { characterId } = req.body as { characterId?: string };
+
+    if (!characterId) {
+      res.status(400).json({ error: 'characterId is required' });
+      return;
+    }
+
+    const progress = await getOrCreateProgress(userId);
+    if (!progress.ownedCharacters) progress.ownedCharacters = ['character-a'];
+
+    if (characterId !== 'character-a' && !progress.ownedCharacters.includes(characterId)) {
+      res.status(400).json({ error: 'character_not_owned' });
+      return;
+    }
+
+    progress.selectedCharacter = characterId;
+    await progress.save();
+
+    res.json({ progress });
+  } catch (error) {
+    console.error('selectCharacter error:', error);
+    res.status(500).json({ error: 'Failed to select character' });
+  }
+};
+
 /**
  * Get the leaderboard
  */

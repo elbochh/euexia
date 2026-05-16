@@ -13,7 +13,8 @@ import gameRoutes from './routes/game.routes';
 import chatRoutes from './routes/chat.routes';
 
 const app = express();
-const PORT = process.env.PORT || 5000;
+// EB AL2023 nginx proxies to 8080; use 5000 for local dev.
+const PORT = process.env.PORT || (process.env.NODE_ENV === 'production' ? 8080 : 5000);
 
 // Allowed CORS origins.
 // FRONTEND_URL is set in production (Amplify URL or custom domain).

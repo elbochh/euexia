@@ -90,6 +90,10 @@ export const gameApi = {
   getMap: (consultationId: string, mapIndex?: number) =>
     api.get('/game/map', { params: { consultationId, mapIndex } }),
   getConsultationsWithMaps: () => api.get('/game/consultations'),
+  purchaseCharacter: (characterId: string) =>
+    api.post('/game/character/purchase', { characterId }),
+  selectCharacter: (characterId: string) =>
+    api.post('/game/character/select', { characterId }),
 };
 
 // Doctor chat

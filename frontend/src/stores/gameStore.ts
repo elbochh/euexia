@@ -14,6 +14,8 @@ interface GameProgress {
   xp: number;
   level: number;
   coins: number;
+  ownedCharacters?: string[];
+  selectedCharacter?: string;
   currentTheme: string;
   completedThemes: string[];
   streak: number;
@@ -178,6 +180,8 @@ interface GameStore {
   loadConsultationsWithMaps: () => Promise<void>;
   deleteConsultation: (consultationId: string) => Promise<boolean>;
   initFromStorage: () => void;
+  purchaseCharacter: (characterId: string) => Promise<void>;
+  selectCharacter: (characterId: string) => Promise<void>;
 }
 
 export const useGameStore = create<GameStore>((set, get) => ({
@@ -426,6 +430,24 @@ export const useGameStore = create<GameStore>((set, get) => ({
       } catch {
         // Invalid stored data
       }
+    }
+  },
+
+  purchaseCharacter: async (characterId: string) => {
+    try {
+      const res = await gameApi.purchaseCharacter(characterId);
+      set({ progress: res.data.progress });
+    } catch (error) {
+      console.error('Failed to purchase character:', error);
+    }
+  },
+
+  selectCharacter: async (characterId: string) => {
+    try {
+      const res = await gameApi.selectCharacter(characterId);
+      set({ progress: res.data.progress });
+    } catch (error) {
+      console.error('Failed to select character:', error);
     }
   },
 }));

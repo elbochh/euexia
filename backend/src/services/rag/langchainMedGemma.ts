@@ -108,7 +108,7 @@ function isFuzzySimilar(a: string, b: string): boolean {
 }
 
 /**
- * Post-process MedGemma output:
+ * Post-process model output:
  *  1. Remove leading role labels
  *  2. Remove code fences and programming code
  *  3. Deduplicate lines and sentences (exact + fuzzy)
@@ -256,7 +256,7 @@ function buildPrompt(request: MedGemmaChatRequest): string {
 }
 
 /**
- * Generate a response from MedGemma via SageMaker TGI.
+ * Generate a response from the configured text model.
  *
  * Now includes recent conversation history in the prompt so the model
  * can maintain context across turns (e.g., "how will THESE meals affect my disease").

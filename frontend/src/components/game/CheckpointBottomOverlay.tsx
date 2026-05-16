@@ -48,7 +48,6 @@ export default function CheckpointBottomOverlay({
 
   const handleComplete = (itemId: string) => {
     onComplete(itemId);
-    setTimeout(() => onClose(), 500);
   };
 
   return (
@@ -89,7 +88,7 @@ export default function CheckpointBottomOverlay({
               <div className="px-6 pb-6 pt-2 overflow-y-auto flex-1 min-h-0">
                 <div className="text-center mb-4">
                   <div className="text-5xl mb-2">{categoryIcon}</div>
-                  <div className="text-sm text-gray-400 mb-1">Checkpoint {checkpointNumber}</div>
+                  <div className="text-sm text-gray-400 mb-1">Day {checkpointNumber}</div>
                   <h3 className="text-xl font-bold text-white">
                     {items.length === 1 ? items[0].title : `${items.length} tasks at this checkpoint`}
                   </h3>

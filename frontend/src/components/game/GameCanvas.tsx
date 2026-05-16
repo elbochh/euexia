@@ -39,6 +39,8 @@ interface GameCanvasProps {
   eventsPerStar?: ChecklistItem[][];
   onCheckpointClick?: (index: number) => void;
   userName?: string;
+  playerCharacterId?: string;
+  introMessage?: string;
 }
 
 export default function GameCanvas({
@@ -50,6 +52,8 @@ export default function GameCanvas({
   eventsPerStar,
   onCheckpointClick,
   userName,
+  playerCharacterId,
+  introMessage,
 }: GameCanvasProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const appRef = useRef<Application | null>(null);
@@ -88,10 +92,12 @@ export default function GameCanvas({
   );
 
   const loadKenneyCharacterFrames = useCallback(
-    async (characterId: 'player' | 'doctor'): Promise<Texture[] | null> => {
+    async (characterId: 'player' | 'doctor', skinId?: string): Promise<Texture[] | null> => {
       const assetPath =
         characterId === 'doctor'
           ? '/kenney_blocky-characters_20/Previews/character-i.png'
+          : skinId
+          ? `/kenney_blocky-characters_20/Previews/${skinId}.png`
           : '/kenney_blocky-characters_20/Previews/character-a.png';
       try {
         const texture = (await Assets.load(assetPath)) as Texture;
@@ -555,6 +561,11 @@ export default function GameCanvas({
         const { x: cx, y: cy } = starPixels[index];
 
         const eventsAtStar = eventsPerStar?.[index] ?? (checklistItems[index] ? [checklistItems[index]] : []);
+        const totalStarCoins = eventsAtStar.reduce((sum, e: ChecklistItem) => sum + (e.coinReward || 0), 0);
+        const earnedStarCoins = eventsAtStar.reduce(
+          (sum, e: ChecklistItem) => sum + (e.isCompleted ? e.coinReward || 0 : 0),
+          0
+        );
         const isStarCompleted = eventsAtStar.some((e: ChecklistItem) => e.isCompleted);
         const hasAvailable = eventsAtStar.some((e: ChecklistItem) => !e.isCompleted && !e.isLocked);
         const isStarLocked = eventsAtStar.length > 0 && !isStarCompleted && !hasAvailable;
@@ -626,6 +637,45 @@ export default function GameCanvas({
         }
 
         checkpointContainer.addChild(checkpoint);
+
+        // Day label + coin progress under each star
+        const labelY = cy + COIN_R + 22;
+        const dayLabelStroke = new Text({
+          text: `Day ${index + 1}`,
+          style: new TextStyle({
+            fontSize: 11,
+            fill: '#020617',
+            fontFamily: 'Arial',
+            fontWeight: 'bold',
+            stroke: { color: 0x020617, width: 4, join: 'round' },
+          }),
+        });
+        dayLabelStroke.anchor.set(0.5);
+        dayLabelStroke.position.set(cx, labelY);
+        const dayLabelFill = new Text({
+          text: `Day ${index + 1}`,
+          style: new TextStyle({
+            fontSize: 11,
+            fill: '#f9fafb',
+            fontFamily: 'Arial',
+            fontWeight: 'bold',
+          }),
+        });
+        dayLabelFill.anchor.set(0.5);
+        dayLabelFill.position.set(cx, labelY);
+
+        const coinsLabel = new Text({
+          text: totalStarCoins > 0 ? `${earnedStarCoins}/${totalStarCoins} coins` : '',
+          style: new TextStyle({
+            fontSize: 10,
+            fill: '#e5e7eb',
+            fontFamily: 'Arial',
+          }),
+        });
+        coinsLabel.anchor.set(0.5);
+        coinsLabel.position.set(cx, labelY + 14);
+
+        scrollContainer.addChild(dayLabelStroke, dayLabelFill, coinsLabel);
         floatingCoins.push({ container: checkpoint, baseY: cy, phaseOffset: index * 0.62 });
       }
       scrollContainer.addChild(checkpointContainer);
@@ -733,7 +783,9 @@ export default function GameCanvas({
       backpack.roundRect(-11, -4, 8, 14, 4); backpack.fill(0x4f46e5); backpack.roundRect(-11, -4, 8, 14, 4); backpack.stroke(outline);
       player.addChild(backpack);
 
-      const playerIdleFrames = (await loadAnimationFrames('player', 'idle')) ?? (await loadKenneyCharacterFrames('player'));
+      const playerIdleFrames =
+        (await loadAnimationFrames('player', 'idle')) ??
+        (await loadKenneyCharacterFrames('player', playerCharacterId as any));
       const playerWalkFrames = await loadAnimationFrames('player', 'walk');
       if (!isRenderActive()) return;
 
@@ -787,7 +839,9 @@ export default function GameCanvas({
       pulseIndicator = new Graphics(); pulseIndicator.circle(0, 18, 2); pulseIndicator.fill({ color: 0xef4444, alpha: 0.8 }); doctor.addChild(pulseIndicator);
       const chatHint = new Text({ text: '💬', style: new TextStyle({ fontSize: 14, fontFamily: 'Arial' }) }); chatHint.anchor.set(0.5); chatHint.position.set(0, -35); doctor.addChild(chatHint);
 
-      const doctorFrames = (await loadAnimationFrames('doctor', 'idle')) ?? (await loadKenneyCharacterFrames('doctor'));
+      const doctorFrames =
+        (await loadAnimationFrames('doctor', 'idle')) ??
+        (await loadKenneyCharacterFrames('doctor'));
       if (!isRenderActive()) return;
 
       if (doctorFrames && doctorFrames.length > 0) {
@@ -815,6 +869,81 @@ export default function GameCanvas({
       const doctorContainer = new Container();
       doctorContainer.addChild(doctor); doctorContainer.zIndex = 1000;
       scrollContainer.addChild(doctorContainer);
+
+      // ── Intro walk animation (first time per consultation) ─────────────────
+      if (introMessage) {
+        const originalPlayerX = player.position.x;
+        const originalDoctorX = doctorContainer.position.x + doctor.position.x;
+        const startOffset = 220;
+        player.position.x = originalPlayerX - startOffset;
+        doctorContainer.position.x -= startOffset;
+
+        const bubble = new Graphics();
+        // Slightly wider & taller to avoid text clipping on mobile
+        const bubbleWidth = 240;
+        const bubbleHeight = 80;
+        const bubbleY = -(characterTargetHeight + 90);
+        bubble.roundRect(-bubbleWidth / 2, bubbleY, bubbleWidth, bubbleHeight, 12);
+        bubble.fill({ color: 0x020617, alpha: 0.96 });
+        bubble.stroke({ color: 0x38bdf8, width: 2 });
+
+        const bubbleText = new Text({
+          text: introMessage,
+          style: new TextStyle({
+            fontSize: 13,
+            fill: '#e5e7eb',
+            fontFamily: 'Arial',
+            wordWrap: true,
+            wordWrapWidth: bubbleWidth - 20,
+            lineHeight: 19,
+          }),
+        });
+        bubbleText.anchor.set(0.5, 0.5);
+        bubbleText.position.set(0, bubbleY + bubbleHeight / 2);
+
+        const bubbleContainer = new Container();
+        bubbleContainer.addChild(bubble);
+        bubbleContainer.addChild(bubbleText);
+        doctorContainer.addChild(bubbleContainer);
+
+        let elapsed = 0;
+        const durationMs = 4000;
+
+        const introTicker = (_ticker: any) => {
+          if (!isRenderActive()) {
+            app.ticker.remove(introTicker);
+            return;
+          }
+          elapsed += (app.ticker.deltaMS || 16.67);
+          const t = Math.min(1, elapsed / durationMs);
+          const ease = 1 - Math.pow(1 - t, 3);
+          player.position.x = originalPlayerX - startOffset + startOffset * ease;
+          doctorContainer.position.x = originalDoctorX - startOffset + startOffset * ease;
+
+          if (t >= 1) {
+            app.ticker.remove(introTicker);
+
+            let fadeElapsed = 0;
+            const fadeDuration = 1200;
+            const fadeTicker = (_t: any) => {
+              if (!isRenderActive()) {
+                app.ticker.remove(fadeTicker);
+                return;
+              }
+              fadeElapsed += (app.ticker.deltaMS || 16.67);
+              const ft = Math.min(1, fadeElapsed / fadeDuration);
+              bubbleContainer.alpha = 1 - ft;
+              if (ft >= 1) {
+                app.ticker.remove(fadeTicker);
+                doctorContainer.removeChild(bubbleContainer);
+              }
+            };
+            app.ticker.add(fadeTicker);
+          }
+        };
+
+        app.ticker.add(introTicker);
+      }
 
       // ── Initial character positions ────────────────────────────────────────
       const progressIdx = Math.max(-1, Math.min(completed - 1, starCount - 1));
@@ -913,7 +1042,7 @@ export default function GameCanvas({
         clickableGlow.alpha = 0.08 + Math.sin(tick * 3) * 0.05;
       });
     },
-    [onCheckpointClick, checklistItems, eventsPerStar, loadAnimationFrames, loadKenneyCharacterFrames, userName]
+    [onCheckpointClick, checklistItems, eventsPerStar, loadAnimationFrames, loadKenneyCharacterFrames, userName, playerCharacterId]
   );
 
   useEffect(() => {

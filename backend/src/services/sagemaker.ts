@@ -2,16 +2,79 @@ import {
   SageMakerRuntimeClient,
   InvokeEndpointCommand,
 } from '@aws-sdk/client-sagemaker-runtime';
+import { GoogleAuth } from 'google-auth-library';
 import { sagemakerConfig } from '../config/sagemaker';
 
 const sageClient = new SageMakerRuntimeClient({ region: sagemakerConfig.region });
-type Provider = 'openai' | 'sagemaker';
+type Provider = 'openai' | 'sagemaker' | 'vertex';
 
-function getProvider(mode: 'text' | 'vision' | 'asr' | 'image_generation'): Provider {
+function getProvider(mode: 'text' | 'vision' | 'asr'): Provider {
   if (mode === 'text') return (process.env.AI_TEXT_PROVIDER as Provider) || 'openai';
   if (mode === 'vision') return (process.env.AI_VISION_PROVIDER as Provider) || 'openai';
-  if (mode === 'asr') return (process.env.AI_ASR_PROVIDER as Provider) || 'openai';
-  return (process.env.AI_IMAGE_GENERATION_PROVIDER as Provider) || 'openai';
+  return (process.env.AI_ASR_PROVIDER as Provider) || 'openai';
+}
+
+const vertexAuth = new GoogleAuth({
+  scopes: ['https://www.googleapis.com/auth/cloud-platform'],
+});
+
+function getVertexEndpoint(): string {
+  const project = process.env.GOOGLE_CLOUD_PROJECT || process.env.GCLOUD_PROJECT;
+  if (!project) {
+    throw new Error('AI provider vertex requires GOOGLE_CLOUD_PROJECT');
+  }
+
+  const location = process.env.GOOGLE_VERTEX_LOCATION || 'global';
+  const host = location === 'global'
+    ? 'https://aiplatform.googleapis.com'
+    : `https://${location}-aiplatform.googleapis.com`;
+
+  return `${host}/v1/projects/${project}/locations/${location}/endpoints/openapi/chat/completions`;
+}
+
+async function getVertexAccessToken(): Promise<string> {
+  if (process.env.GOOGLE_VERTEX_ACCESS_TOKEN) {
+    return process.env.GOOGLE_VERTEX_ACCESS_TOKEN;
+  }
+
+  const client = await vertexAuth.getClient();
+  const tokenResponse = await client.getAccessToken();
+  const token = typeof tokenResponse === 'string' ? tokenResponse : tokenResponse?.token;
+  if (!token) {
+    throw new Error('Could not obtain Google Cloud access token for Vertex AI');
+  }
+  return token;
+}
+
+async function invokeVertexChat(
+  messages: Array<{ role: 'system' | 'user' | 'assistant'; content: any }>,
+  options?: TextGenerationOptions
+): Promise<SageMakerResponse> {
+  const model = process.env.GOOGLE_VERTEX_MODEL || 'gemma-4-26b-a4b-it-maas';
+  const token = await getVertexAccessToken();
+
+  const response = await fetch(getVertexEndpoint(), {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json; charset=utf-8',
+    },
+    body: JSON.stringify({
+      model,
+      messages,
+      temperature: options?.temperature ?? 0.2,
+      max_tokens: options?.max_new_tokens ?? 2048,
+      stream: false,
+    }),
+  });
+
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(`Vertex AI Gemma call failed: ${response.status} ${body}`);
+  }
+
+  const result: any = await response.json();
+  return { text: result?.choices?.[0]?.message?.content || '', raw: result };
 }
 
 export interface SageMakerResponse {
@@ -27,7 +90,7 @@ export interface TextGenerationOptions {
 }
 
 /**
- * Invoke OpenAI text model for text-based medical analysis.
+ * Invoke the configured text model for text-based medical analysis.
  * Kept under the same function name to avoid touching all agent files.
  */
 export async function invokeTextModel(
@@ -59,6 +122,16 @@ export async function invokeTextModel(
     const response = await sageClient.send(command);
     const result = JSON.parse(new TextDecoder().decode(response.Body));
     return { text: result[0]?.generated_text || result.generated_text || '', raw: result };
+  }
+
+  if (provider === 'vertex') {
+    return invokeVertexChat([
+      {
+        role: 'system',
+        content: 'You are a precise medical assistant. Return clear, faithful outputs without fabricating facts.',
+      },
+      { role: 'user', content: prompt },
+    ], options);
   }
 
   const apiKey = process.env.OPENAI_API_KEY;
@@ -96,46 +169,7 @@ export async function invokeTextModel(
 }
 
 /**
- * Invoke OpenAI only for checklist structuring (GPT-4.1). Used so checklist
- * events always come from GPT-4.1 regardless of AI_TEXT_PROVIDER.
- */
-export async function invokeOpenAIForChecklist(prompt: string): Promise<SageMakerResponse> {
-  const apiKey = process.env.OPENAI_API_KEY;
-  const model = process.env.OPENAI_CHECKLIST_MODEL || process.env.OPENAI_TEXT_MODEL || 'gpt-4.1-mini';
-  if (!apiKey) {
-    throw new Error('OPENAI_API_KEY is required for checklist structuring (GPT-4.1)');
-  }
-
-  const response = await fetch('https://api.openai.com/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      model,
-      temperature: 0.2,
-      messages: [
-        {
-          role: 'system',
-          content: 'You are a precise medical assistant. Return only valid JSON arrays with no extra text.',
-        },
-        { role: 'user', content: prompt },
-      ],
-    }),
-  });
-
-  if (!response.ok) {
-    const body = await response.text();
-    throw new Error(`OpenAI checklist call failed: ${response.status} ${body}`);
-  }
-
-  const result: any = await response.json();
-  return { text: result?.choices?.[0]?.message?.content || '', raw: result };
-}
-
-/**
- * Invoke MedGemma multimodal model for image + text analysis (chest X-rays, medical images)
+ * Invoke the configured multimodal model for image + text analysis.
  */
 export async function invokeImageModel(
   imageBase64: string,
@@ -166,6 +200,22 @@ export async function invokeImageModel(
     const response = await sageClient.send(command);
     const result = JSON.parse(new TextDecoder().decode(response.Body));
     return { text: result[0]?.generated_text || result.generated_text || '', raw: result };
+  }
+
+  if (provider === 'vertex') {
+    const imageUrl = imageBase64.startsWith('data:')
+      ? imageBase64
+      : `data:image/png;base64,${imageBase64}`;
+
+    return invokeVertexChat([
+      {
+        role: 'user',
+        content: [
+          { type: 'text', text: prompt },
+          { type: 'image_url', image_url: { url: imageUrl } },
+        ],
+      },
+    ]);
   }
 
   const apiKey = process.env.OPENAI_API_KEY;
@@ -274,88 +324,6 @@ export async function invokeAsrModel(audioBase64: string): Promise<SageMakerResp
   }
 }
 
-/**
- * Image generation abstraction to keep a single switch point per mode.
- * Returns either b64 payload or URL based payload.
- */
-export async function invokeImageGenerationModel(params: {
-  prompt: string;
-  previousImageBuffer?: Buffer;
-  size?: '1024x1024' | '1024x1536' | '1536x1024' | 'auto';
-  quality?: 'standard' | 'high' | 'medium' | 'low' | 'auto';
-}): Promise<{ b64_json?: string; url?: string; raw?: any }> {
-  const provider = getProvider('image_generation');
-  if (provider === 'sagemaker') {
-    const endpoint = process.env.SAGEMAKER_MAP_IMAGE_GEN_ENDPOINT;
-    if (!endpoint) {
-      throw new Error('AI_IMAGE_GENERATION_PROVIDER=sagemaker but SAGEMAKER_MAP_IMAGE_GEN_ENDPOINT is missing');
-    }
-    const command = new InvokeEndpointCommand({
-      EndpointName: endpoint,
-      ContentType: 'application/json',
-      Body: JSON.stringify({
-        prompt: params.prompt,
-        image_base64: params.previousImageBuffer?.toString('base64') || null,
-        size: params.size || '1024x1024',
-      }),
-    });
-    const response = await sageClient.send(command);
-    const result = JSON.parse(new TextDecoder().decode(response.Body));
-    return { b64_json: result?.b64_json, url: result?.url, raw: result };
-  }
-
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) {
-    throw new Error('OPENAI_API_KEY missing');
-  }
-  const model = process.env.OPENAI_IMAGE_MODEL || 'gpt-image-1';
-  const size = params.size || '1024x1024';
-  const quality = params.quality || (model === 'gpt-image-1' ? 'high' : 'standard');
-
-  if (params.previousImageBuffer && model === 'gpt-image-1') {
-    const form = new FormData();
-    form.append('model', model);
-    form.append('prompt', params.prompt);
-    form.append('size', size);
-    form.append('quality', quality);
-    form.append('n', '1');
-    form.append('image', new Blob([new Uint8Array(params.previousImageBuffer)], { type: 'image/png' }), 'previous-map.png');
-    const response = await fetch('https://api.openai.com/v1/images/edits', {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${apiKey}` },
-      body: form,
-    });
-    if (!response.ok) {
-      const body = await response.text();
-      throw new Error(`OpenAI image edit failed: ${response.status} ${body}`);
-    }
-    const data: any = await response.json();
-    return { b64_json: data?.data?.[0]?.b64_json, url: data?.data?.[0]?.url, raw: data };
-  }
-
-  const body: any = { model, prompt: params.prompt, n: 1, size };
-  if (model === 'gpt-image-1') {
-    body.quality = quality;
-  } else {
-    body.quality = quality === 'high' ? 'standard' : quality;
-    body.response_format = 'url';
-  }
-
-  const response = await fetch('https://api.openai.com/v1/images/generations', {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(body),
-  });
-  if (!response.ok) {
-    const err = await response.text();
-    throw new Error(`OpenAI image generation failed: ${response.status} ${err}`);
-  }
-  const data: any = await response.json();
-  return { b64_json: data?.data?.[0]?.b64_json, url: data?.data?.[0]?.url, raw: data };
-}
 
 /**
  * Invoke HeAR model for non-speech audio analysis (lung acoustics, etc.)

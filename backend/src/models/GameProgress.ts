@@ -5,6 +5,8 @@ export interface IGameProgress extends Document {
   xp: number;
   level: number;
   coins: number;
+  ownedCharacters: string[];
+  selectedCharacter?: string;
   currentTheme: string;
   completedThemes: string[];
   streak: number;
@@ -21,6 +23,8 @@ const GameProgressSchema = new Schema<IGameProgress>(
     xp: { type: Number, default: 0 },
     level: { type: Number, default: 1 },
     coins: { type: Number, default: 0 },
+    ownedCharacters: [{ type: String, default: 'character-a' }],
+    selectedCharacter: { type: String, default: 'character-a' },
     currentTheme: { type: String, default: 'desert' },
     completedThemes: [{ type: String }],
     streak: { type: Number, default: 0 },

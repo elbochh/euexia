@@ -26,10 +26,9 @@ function elapsed(start: [number, number]): number {
  * Create a new consultation and process all uploads through the AI pipeline.
  *
  * Pipeline:
- *  1. Process all uploads in PARALLEL (voice→SageMaker ASR, image→SageMaker vision,
- *     text→SageMaker MedGemma, pdf→SageMaker MedGemma)
- *  2. Aggregate summaries via SageMaker MedGemma
- *  3. Structure checklist events via OpenAI GPT-4.1 (best quality for JSON structuring)
+ *  1. Process all uploads in PARALLEL (voice through ASR; image/text/pdf through the configured AI provider)
+ *  2. Aggregate summaries via the configured text model
+ *  3. Structure checklist events via the configured text model
  *  4. Save checklist items → return response to user
  *  5. Generate map spec algorithmically (no AI call — frontend renders via Kenney hex tiles)
  *  6. Fire-and-forget: RAG context indexing
@@ -56,9 +55,9 @@ export const createConsultation = async (req: AuthRequest, res: Response): Promi
     });
     timings['0_db_create'] = elapsed(t);
 
-    // ── Step 1: Process each upload in PARALLEL via SageMaker ──
+    // ── Step 1: Process each upload in PARALLEL via configured AI providers ──
     t = process.hrtime();
-    console.log(`[Pipeline] Step 1: Processing ${consultation.uploads.length} upload(s) in parallel via SageMaker...`);
+    console.log(`[Pipeline] Step 1: Processing ${consultation.uploads.length} upload(s) in parallel via configured AI providers...`);
     const summaryPromises = consultation.uploads.map(async (upload, index) => {
       const uploadStart = process.hrtime();
       try {
@@ -131,9 +130,9 @@ export const createConsultation = async (req: AuthRequest, res: Response): Promi
       console.log(`[Pipeline]   Medications found: ${detectedMeds.map(m => m.name).join(', ')}`);
     }
 
-    // ── Step 2: Aggregate summaries via SageMaker MedGemma ──
+    // ── Step 2: Aggregate summaries via configured text model ──
     t = process.hrtime();
-    console.log(`[Pipeline] Step 2: Aggregating summaries via SageMaker MedGemma...`);
+    console.log(`[Pipeline] Step 2: Aggregating summaries via configured text model...`);
     const rawParagraph = await aggregateSummaries(summaries, medListForPrompt || undefined);
     consultation.aggregatedSummary = summaries.join('\n\n---\n\n');
     timings['2_aggregate'] = elapsed(t);
@@ -169,9 +168,9 @@ export const createConsultation = async (req: AuthRequest, res: Response): Promi
       .replace(/\n{3,}/g, '\n\n')
       .trim();
 
-    // ── Step 3: Structure checklist events via OpenAI GPT-4.1 ──
+    // ── Step 3: Structure checklist events via configured text model ──
     t = process.hrtime();
-    console.log(`[Pipeline] Step 3: Structuring checklist events via OpenAI GPT-4.1...`);
+    console.log(`[Pipeline] Step 3: Structuring checklist events via configured text model...`);
     const eventData = await structureChecklistAsEvents(checklistParagraph);
     timings['3_checklist_events'] = elapsed(t);
     console.log(`[Pipeline] Step 3 done in ${timings['3_checklist_events']}ms — ${eventData.length} events`);
@@ -526,4 +525,3 @@ export const uploadFile = async (req: AuthRequest, res: Response): Promise<void>
     res.status(500).json({ error: 'Failed to upload file' });
   }
 };
-

@@ -117,7 +117,7 @@ export const sendChatMessage = async (
     console.log(`[RAG] Context preview: ${context.contextString.substring(0, 200)}...`);
 
     // ================================================================
-    // STEP 3 — Generate answer via MedGemma (with conversation history)
+    // STEP 3 — Generate answer via configured text model (with conversation history)
     // ================================================================
     // Build compact conversation history for the generation prompt.
     // Exclude the current user message (it's the userMessage param).

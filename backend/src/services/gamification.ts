@@ -23,7 +23,11 @@ export function totalXpForLevel(level: number): number {
 export async function getOrCreateProgress(userId: string): Promise<IGameProgress> {
   let progress = await GameProgress.findOne({ userId });
   if (!progress) {
-    progress = await GameProgress.create({ userId });
+    progress = await GameProgress.create({
+      userId,
+      ownedCharacters: ['character-a'],
+      selectedCharacter: 'character-a',
+    });
   }
   return progress;
 }

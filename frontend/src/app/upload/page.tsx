@@ -131,7 +131,7 @@ Follow-up: Return if symptoms persist beyond day 3.`;
 
     try {
       // Upload files first
-      setProcessingStep('Uploading files...');
+      setProcessingStep('Uploading your files...');
       const processedUploads = [];
 
       for (const upload of uploads) {
@@ -163,13 +163,11 @@ Follow-up: Return if symptoms persist beyond day 3.`;
         }
       }
 
-      // Process through AI pipeline
-      setProcessingStep('AI is analyzing your consultation...');
+      // Process uploads into a consultation
+      setProcessingStep('Processing your consultation uploads...');
       await new Promise((r) => setTimeout(r, 1000)); // UX delay
-
-      setProcessingStep('Generating medical summary...');
+      setProcessingStep('Summarizing your consultation...');
       await new Promise((r) => setTimeout(r, 800));
-
       setProcessingStep('Creating your health checklist...');
       
       // Verify token exists before making request
@@ -396,7 +394,7 @@ Follow-up: Return if symptoms persist beyond day 3.`;
               {uploads.length >= selectedTypes.size && (
                 <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="mt-4">
                   <button onClick={handleProcess} className="btn-game w-full text-lg">
-                    🤖 Process with AI
+                    ▶️ Process consultation uploads
                   </button>
                 </motion.div>
               )}
@@ -417,20 +415,11 @@ Follow-up: Return if symptoms persist beyond day 3.`;
               animate={{ opacity: 1, scale: 1 }}
               className="text-center py-16"
             >
-              <motion.div
-                animate={{
-                  rotate: [0, 360],
-                  scale: [1, 1.2, 1],
-                }}
-                transition={{
-                  rotate: { repeat: Infinity, duration: 2, ease: 'linear' },
-                  scale: { repeat: Infinity, duration: 1.5 },
-                }}
-                className="text-6xl mb-6 inline-block"
-              >
-                🤖
-              </motion.div>
-              <h2 className="text-xl font-bold mb-2">Processing...</h2>
+              {/* Simple modern loading indicator */}
+              <div className="flex items-center justify-center mb-6">
+                <div className="w-10 h-10 border-4 border-blue-500/40 border-t-blue-400 rounded-full animate-spin" />
+              </div>
+              <h2 className="text-xl font-bold mb-2">Processing your consultation...</h2>
               <motion.p
                 key={processingStep}
                 initial={{ opacity: 0 }}
@@ -475,8 +464,8 @@ Follow-up: Return if symptoms persist beyond day 3.`;
               </motion.div>
               <h2 className="text-2xl font-bold mb-2">Quest Board Updated!</h2>
               <p className="text-gray-400 text-sm mb-8">
-                Your AI-powered health checklist is ready. Complete your quests
-                to earn XP and climb the leaderboard!
+                Your health checklist is ready. Complete your quests to earn XP and
+                climb the leaderboard!
               </p>
 
               <div className="space-y-3">

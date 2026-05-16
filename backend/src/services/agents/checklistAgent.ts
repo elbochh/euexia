@@ -1,4 +1,4 @@
-import { invokeTextModel, invokeOpenAIForChecklist } from '../sagemaker';
+import { invokeTextModel } from '../sagemaker';
 
 export interface ChecklistItemData {
   title: string;
@@ -34,91 +34,43 @@ export interface ChecklistEventData {
 /* ------------------------------------------------------------------ */
 
 function buildStructuredPrompt(paragraph: string): string {
-  return `You are a clinical AI assistant. Convert the care plan into a JSON array.
+  return `You are a clinical AI assistant. Convert this care plan into a JSON ARRAY of checklist items.
 
-RULES:
-1. One item per medication, test, appointment, or lifestyle instruction.
-2. "title" must be SHORT and CLEAN — just the action + medicine name (e.g. "Take Bisoprolol", "Check INR levels", "Walk 30 minutes"). NO dosage, NO frequency, NO duration in the title.
-3. "description" must be HELPFUL and PRACTICAL for the patient:
-   - For medications: include exact dose, how many tablets, before/after meals, with water, morning/evening, duration, and any warnings.
-   - For lifestyle: include specific practical tips the patient can follow.
-   - For appointments: include what to bring, what to mention.
-   - Write as if advising a friend — warm, clear, actionable.
-4. Return ONLY a valid JSON array — no explanation, no markdown.
+Guidelines:
+- One object per medication / appointment / test / monitoring / lifestyle task.
+- \"title\": short action + name only (e.g. \"Take Bisoprolol\", \"Check INR\", \"Walk 30 minutes\"). No dose/frequency/duration in title.
+- \"description\": clear patient instructions including dose, timing, duration, food instructions, and warnings.
+- Be faithful to the plan; do not invent new medications or tasks.
+- Output MUST be only a JSON array (no prose, no markdown).
 
-JSON schema for each object:
+Each object:
 {
-  "title": "string (SHORT, max 30 chars, just action + name, e.g. 'Take Bisoprolol')",
-  "description": "string (practical advice: dose, when, with/without food, tips)",
-  "frequency": "once|daily|twice daily|three times daily|every X hours|weekly|as needed",
-  "category": "medication|nutrition|exercise|monitoring|appointment|test|lifestyle|general",
-  "xpReward": 5-30,
-  "coinReward": 3-15,
-  "unlockAfterHours": 0,
-  "cooldownHours": 0-168,
-  "totalRequired": 0-999,
-  "durationDays": 0-365,
-  "timeOfDay": "morning|afternoon|evening|night|any"
+  \"title\": string,
+  \"description\": string,
+  \"frequency\": string,
+  \"category\": \"medication\"|\"nutrition\"|\"exercise\"|\"monitoring\"|\"appointment\"|\"test\"|\"lifestyle\"|\"general\",
+  \"xpReward\": 5-30,
+  \"coinReward\": 3-15,
+  \"unlockAfterHours\": number,
+  \"cooldownHours\": number,
+  \"totalRequired\": number,
+  \"durationDays\": number,
+  \"timeOfDay\": \"morning\"|\"afternoon\"|\"evening\"|\"night\"|\"any\"
 }
-
-Example:
-[
-  {
-    "title": "Take Bisoprolol",
-    "description": "Take 1 tablet (2.5mg) every morning with breakfast. Swallow with a full glass of water. Do not skip doses — this helps control your heart rate. Continue for 2 weeks.",
-    "frequency": "daily",
-    "category": "medication",
-    "xpReward": 25,
-    "coinReward": 12,
-    "unlockAfterHours": 0,
-    "cooldownHours": 24,
-    "totalRequired": 14,
-    "durationDays": 14,
-    "timeOfDay": "morning"
-  },
-  {
-    "title": "Take Omeprazole",
-    "description": "Take 1 capsule (40mg) 30 minutes before breakfast on an empty stomach. This protects your stomach lining. Continue for 2 weeks.",
-    "frequency": "daily",
-    "category": "medication",
-    "xpReward": 25,
-    "coinReward": 12,
-    "unlockAfterHours": 0,
-    "cooldownHours": 24,
-    "totalRequired": 14,
-    "durationDays": 14,
-    "timeOfDay": "morning"
-  },
-  {
-    "title": "Book follow-up visit",
-    "description": "Schedule a follow-up appointment within 2 weeks. Bring your medication list and any blood test results. Mention how you felt on the new medications.",
-    "frequency": "once",
-    "category": "appointment",
-    "xpReward": 20,
-    "coinReward": 10,
-    "unlockAfterHours": 0,
-    "cooldownHours": 0,
-    "totalRequired": 1,
-    "durationDays": 14,
-    "timeOfDay": "any"
-  }
-]
 
 Care plan:
 ${paragraph}
 
-JSON array:`;
+JSON array only:`;
 }
 
 function buildSimpleRetryPrompt(paragraph: string): string {
-  return `Convert this medical care plan into a JSON array. Each medication, test, appointment, or lifestyle instruction = 1 object.
+  return `Care plan → JSON ARRAY. Each medication / appointment / test / lifestyle item = 1 object.
 
-TITLE RULE: Short name only (e.g. "Take Bisoprolol", "Check INR", "Eat more fiber"). No dose or frequency in title.
-DESCRIPTION RULE: Include dose, timing, before/after meals, practical patient advice, duration.
-
-Fields: title (short name), description (practical advice with dose), frequency, category, xpReward (5-30), coinReward (3-15), unlockAfterHours, cooldownHours, totalRequired, durationDays, timeOfDay.
-
-Return ONLY a JSON array.
+- title: short action + name only
+- description: patient-friendly instructions with dose, timing, duration
+- include: title, description, frequency, category, xpReward, coinReward, unlockAfterHours, cooldownHours, totalRequired, durationDays, timeOfDay
+- output MUST be only a JSON array
 
 Care plan:
 ${paragraph}
@@ -511,39 +463,32 @@ function ruleBasedFallback(paragraph: string): ChecklistItemData[] {
 }
 
 /* ------------------------------------------------------------------ */
-/*  Event-based structuring (GPT-4.1 only)                            */
+/*  Event-based structuring                                            */
 /* ------------------------------------------------------------------ */
 
 function buildEventsPrompt(paragraph: string, nowIso: string): string {
-  return `Convert the care plan into a JSON array of events. Each event = one actionable task the patient can complete.
+  return `Convert this care plan into a JSON ARRAY of SCHEDULED EVENTS (one event = one actionable task occurrence).
 
-Extract ALL actionable items: medications, appointments, tests, monitoring, lifestyle changes. Create events for each occurrence.
+Include medications, appointments, tests, monitoring and lifestyle actions.
 
-RULES:
-1. Frequency expansion:
-   - Daily for 7 days = 7 events (orderInGroup 0..6)
-   - Twice daily for 7 days = 14 events (morning 08:00 + evening 19:00, orderInGroup 0..13)
-   - Three times daily = 21 events (08:00, 14:00, 19:00, orderInGroup 0..20)
-2. unlockAt: ISO 8601 date-time. Day 1 = first day from now. Times: morning 08:00, afternoon 14:00, evening 18:00, night 19:00.
-3. sequenceId: unique per medication/routine. Same sequenceId = sequential unlock by orderInGroup.
-4. starGroupId: same day events share same starGroupId (use date YYYY-MM-DD).
-5. title: short, actionable (e.g., "Take Amoxicillin", "Book follow-up in 6 weeks", "Get FBC test", "Check INR weekly").
-6. description: complete details (dose/timing for meds, timeframe/doctor for appointments, specific test name for tests).
-7. Return ONLY valid JSON array — no markdown.
+Rules:
+1) Expand frequencies into events:
+   - daily for N days → N events
+   - twice daily → morning (08:00) and evening (19:00), etc.
+2) unlockAt: ISO 8601. Day 1 starts from "${nowIso}". Use:
+   morning 08:00, afternoon 14:00, evening 18:00, night 19:00.
+3) sequenceId: unique per medication/routine; events with same sequenceId and increasing orderInGroup unlock sequentially.
+4) starGroupId: same calendar day share same starGroupId (YYYY-MM-DD).
+5) title: short action + name. description: full dose/timing/timeframe details.
+6) Output MUST be only a JSON array.
 
-Reference "now": ${nowIso}
-
-Schema: {"title":"string","description":"string","category":"medication|nutrition|exercise|monitoring|appointment|test|lifestyle|general","xpReward":5-30,"coinReward":3-15,"unlockAt":"ISO 8601","groupId":"string","sequenceId":"string","starGroupId":"string","orderInGroup":0}
-
-Examples:
-[{"title":"Take Amoxicillin (1/3)","description":"Take 500mg with breakfast.","category":"medication","xpReward":25,"coinReward":12,"unlockAt":"2025-02-20T08:00:00.000Z","groupId":"amox","sequenceId":"amox","starGroupId":"2025-02-20","orderInGroup":0}]
-[{"title":"Take Metformin (1/4)","description":"Take 500mg with breakfast.","category":"medication","xpReward":25,"coinReward":12,"unlockAt":"2025-02-20T08:00:00.000Z","groupId":"metformin","sequenceId":"metformin","starGroupId":"2025-02-20","orderInGroup":0},{"title":"Take Metformin (2/4)","description":"Take 500mg with dinner.","category":"medication","xpReward":25,"coinReward":12,"unlockAt":"2025-02-20T19:00:00.000Z","groupId":"metformin","sequenceId":"metformin","starGroupId":"2025-02-20","orderInGroup":1}]
-[{"title":"Book follow-up in 6 weeks","description":"Schedule follow-up in 6 weeks with Dr Wide. Bring medication list.","category":"appointment","xpReward":20,"coinReward":10,"unlockAt":"2025-02-20T00:00:00.000Z","groupId":"appt","sequenceId":"appt","starGroupId":"2025-02-20","orderInGroup":0},{"title":"Get FBC test","description":"Get FBC test every two weeks. No fasting required.","category":"test","xpReward":20,"coinReward":10,"unlockAt":"2025-02-20T00:00:00.000Z","groupId":"fbc","sequenceId":"fbc","starGroupId":"2025-02-20","orderInGroup":0},{"title":"Check INR weekly","description":"Check INR levels weekly. Contact Dr Deep if INR falls below 2.0.","category":"monitoring","xpReward":15,"coinReward":8,"unlockAt":"2025-02-20T00:00:00.000Z","groupId":"inr","sequenceId":"inr","starGroupId":"2025-02-20","orderInGroup":0}]
+Each event:
+{"title":"string","description":"string","category":"medication|nutrition|exercise|monitoring|appointment|test|lifestyle|general","xpReward":5-30,"coinReward":3-15,"unlockAt":"ISO 8601","groupId":"string","sequenceId":"string","starGroupId":"string","orderInGroup":0}
 
 Care plan:
 ${paragraph}
 
-JSON array:`;
+JSON array only:`;
 }
 
 /**
@@ -681,7 +626,7 @@ function validateAndNormalizeEvents(raw: any[], now: Date): ChecklistEventData[]
 }
 
 /**
- * Structure care plan as events (GPT-4.1 only). One DB row per event; map has one star per groupId.
+ * Structure care plan as events. One DB row per event; map has one star per groupId.
  */
 export async function structureChecklistAsEvents(paragraph: string): Promise<ChecklistEventData[]> {
   const now = new Date();
@@ -689,11 +634,16 @@ export async function structureChecklistAsEvents(paragraph: string): Promise<Che
   const prompt = buildEventsPrompt(paragraph, nowIso);
 
   try {
-    const result = await invokeOpenAIForChecklist(prompt);
+    const result = await invokeTextModel(prompt, {
+      max_new_tokens: 4096,
+      temperature: 0.1,
+      return_full_text: false,
+      repetition_penalty: 1.05,
+    });
     const parsed = extractJsonArray(result.text);
     const events = validateAndNormalizeEvents(parsed, now);
     if (events.length > 0) {
-      console.log(`[Checklist] structureChecklistAsEvents: ${events.length} events from GPT-4.1`);
+      console.log(`[Checklist] structureChecklistAsEvents: ${events.length} events from configured text model`);
       return events;
     }
   } catch (err: any) {

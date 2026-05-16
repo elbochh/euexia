@@ -1,7 +1,7 @@
 import { invokeAsrModel, invokeTextModel } from '../sagemaker';
 
 /**
- * Voice Agent: transcribes audio using MedASR, then summarizes with MedGemma-text.
+ * Voice Agent: transcribes audio using MedASR, then summarizes with the configured text model.
  * Designed to catch every clinical detail from doctor–patient conversations.
  */
 export async function processVoice(audioBase64: string): Promise<string> {

@@ -1,28 +1,26 @@
 import { invokeTextModel } from '../sagemaker';
 
 /**
- * Text Agent: processes raw text input using MedGemma
+ * Text Agent: processes raw text input using the configured text model.
  * Extracts every specific clinical detail from patient text.
  */
 export async function processText(text: string): Promise<string> {
-  const prompt = `You are a clinical AI assistant. A patient has written a description of their recent medical consultation. Your job is to extract EVERY specific medical detail.
+  const prompt = `You are a clinical AI assistant. A patient has written a description of their medical visit.
 
-CRITICAL: Extract EXACT details. Never generalise.
-- Drug names (brand AND generic if mentioned), EXACT dosages (mg, mL, tablets), EXACT frequency ("every 8 hours", "twice daily"), duration ("for 7 days"), special instructions ("take with food", "on empty stomach")
-- EXACT dates and timeframes for follow-ups ("return in 2 weeks", "appointment on March 5th")
-- EXACT test names and preparation ("fasting glucose test — no food for 12 hours before")
-- SPECIFIC dietary instructions ("avoid dairy for 3 days", "increase fiber to 25g/day")
-- SPECIFIC activity restrictions ("no heavy lifting over 10lbs for 2 weeks", "walk 30 min daily")
-- SPECIFIC warning signs ("go to ER if fever exceeds 102°F", "call doctor if redness spreads")
-- Doctor names, clinic names, phone numbers if mentioned
+Extract a DETAILED MEDICAL SUMMARY that captures every concrete fact from their text, including:
+- diagnoses/conditions
+- medications (name, dose, frequency, duration, key instructions)
+- tests and lab work (which tests, preparation, frequency, key results if present)
+- follow‑ups (when, with whom, and purpose)
+- lifestyle advice (diet, activity, restrictions)
+- warning signs and thresholds that require seeking help.
 
-If the patient is vague, extract what IS there — do not invent details.
-If the patient mentions a condition, include its medical name and what was explained about it.
+Do NOT invent new information; only use what is implied or stated.
 
-Patient's text:
+Patient text:
 ${text}
 
-Detailed Medical Summary:`;
+Detailed medical summary:`;
 
   const result = await invokeTextModel(prompt);
   return result.text;
