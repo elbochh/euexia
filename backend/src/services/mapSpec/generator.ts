@@ -332,7 +332,7 @@ async function tryGenerateWithGemma(
     return null;
   }
 
-  const model = process.env.GOOGLE_VERTEX_MODEL || 'gemma-4-26b-a4b-it-maas';
+  const model = process.env.GOOGLE_VERTEX_MODEL || 'google/gemma-4-26b-a4b-it-maas';
   console.log(`Generating AI map with Gemma 4 (${model}) for ${nodeCount} nodes starting at index ${startIndex}`);
   
   try {

@@ -24,7 +24,7 @@ Required environment variables:
 ```env
 GOOGLE_CLOUD_PROJECT=project-f4cb911b-5b50-4b6e-9d6
 GOOGLE_VERTEX_LOCATION=global
-GOOGLE_VERTEX_MODEL=gemma-4-26b-a4b-it-maas
+GOOGLE_VERTEX_MODEL=google/gemma-4-26b-a4b-it-maas
 USE_MOCK_AGENTS=false
 ```
 
