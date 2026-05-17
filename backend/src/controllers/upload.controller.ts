@@ -222,10 +222,15 @@ export const createConsultation = async (req: AuthRequest, res: Response): Promi
         const eventUnlockAt = new Date(event.unlockAt);
         const eventDateStart = new Date(eventUnlockAt.getFullYear(), eventUnlockAt.getMonth(), eventUnlockAt.getDate());
         
-        // For medication tasks: unlock first dose immediately if it's scheduled for today
-        // Lock second dose onwards and future-day medications
+        // Always make the first generated task immediately completable so the map starts with action.
+        // For medications after that: unlock first dose immediately if it's scheduled for today.
+        // Lock second dose onwards and future-day medications.
         let unlockAt: Date | null = eventUnlockAt;
-        if (event.category === 'medication') {
+        let orderInGroup = event.orderInGroup;
+        if (index === 0) {
+          unlockAt = null;
+          orderInGroup = 0;
+        } else if (event.category === 'medication') {
           const isFirstDose = (event.orderInGroup ?? 0) === 0;
           const isToday = eventDateStart.getTime() === todayStart.getTime();
           
@@ -284,7 +289,7 @@ export const createConsultation = async (req: AuthRequest, res: Response): Promi
           groupId: event.groupId,
           sequenceId: event.sequenceId,
           starGroupId: event.starGroupId,
-          orderInGroup: event.orderInGroup,
+          orderInGroup,
         };
       })
     );

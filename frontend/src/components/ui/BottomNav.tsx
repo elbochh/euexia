@@ -1,13 +1,14 @@
 'use client';
 import { usePathname, useRouter } from 'next/navigation';
 import { motion } from 'framer-motion';
+import { ClipboardList, Map, ScrollText, Trophy, UploadCloud } from 'lucide-react';
 
 const navItems = [
-  { path: '/dashboard', label: 'Map', icon: '🗺️', accent: 'from-emerald-400 to-cyan-400' },
-  { path: '/consultations', label: 'Logs', icon: '📋', accent: 'from-sky-400 to-blue-500' },
-  { path: '/upload', label: 'Upload', icon: '📤', accent: 'from-orange-300 to-amber-500' },
-  { path: '/checklist', label: 'Quests', icon: '✅', accent: 'from-lime-300 to-emerald-500' },
-  { path: '/leaderboard', label: 'Rank', icon: '🏆', accent: 'from-fuchsia-300 to-violet-500' },
+  { path: '/dashboard', label: 'Map', icon: Map, accent: 'from-emerald-400 to-cyan-400' },
+  { path: '/consultations', label: 'Logs', icon: ScrollText, accent: 'from-sky-400 to-blue-500' },
+  { path: '/upload', label: 'Upload', icon: UploadCloud, accent: 'from-orange-300 to-amber-500' },
+  { path: '/checklist', label: 'Quests', icon: ClipboardList, accent: 'from-lime-300 to-emerald-500' },
+  { path: '/leaderboard', label: 'Rank', icon: Trophy, accent: 'from-fuchsia-300 to-violet-500' },
 ];
 
 export default function BottomNav() {
@@ -25,6 +26,7 @@ export default function BottomNav() {
           <div className="absolute inset-x-10 top-0 h-px bg-gradient-to-r from-transparent via-white/45 to-transparent" />
         {navItems.map((item) => {
           const isActive = pathname === item.path;
+          const Icon = item.icon;
           return (
             <button
               key={item.path}
@@ -41,7 +43,15 @@ export default function BottomNav() {
                   className={`absolute inset-1 rounded-[1.1rem] bg-gradient-to-b ${item.accent} opacity-95 shadow-lg shadow-cyan-500/15`}
                 />
               )}
-              <span className="relative text-2xl leading-none drop-shadow">{item.icon}</span>
+              <span
+                className={`relative grid h-7 w-7 place-items-center rounded-[0.9rem] border transition ${
+                  isActive
+                    ? 'border-white/25 bg-white/18 text-white shadow-sm'
+                    : 'border-white/5 bg-slate-900/40 text-slate-400'
+                }`}
+              >
+                <Icon className="h-[18px] w-[18px]" strokeWidth={2.4} />
+              </span>
               <span
                 className={`relative text-[10px] font-black leading-none ${
                   isActive ? 'text-white' : 'text-slate-500'

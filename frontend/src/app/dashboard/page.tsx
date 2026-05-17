@@ -3,7 +3,15 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { motion } from 'framer-motion';
 import dynamic from 'next/dynamic';
-import { ChevronLeft, ChevronRight, MessageCircle, RefreshCw, Stethoscope } from 'lucide-react';
+import {
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
+  ChevronUp,
+  MessageCircle,
+  RefreshCw,
+  Stethoscope,
+} from 'lucide-react';
 import TopBar from '@/components/ui/TopBar';
 import BottomNav from '@/components/ui/BottomNav';
 import RewardPopup from '@/components/ui/RewardPopup';
@@ -38,6 +46,7 @@ export default function DashboardPage() {
   const [showDoctorChat, setShowDoctorChat] = useState(false);
   const [showConsultationSelector, setShowConsultationSelector] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
+  const [routeHudExpanded, setRouteHudExpanded] = useState(false);
   const [introMessage, setIntroMessage] = useState<string | undefined>(undefined);
 
   useEffect(() => {
@@ -211,17 +220,22 @@ export default function DashboardPage() {
             introMessage={introMessage}
           />
 
-          {/* In-map HUD */}
+          {/* In-map route drawer */}
           <motion.div
-            initial={{ opacity: 0, y: -8 }}
+            initial={{ opacity: 0, y: 18 }}
             animate={{ opacity: 1, y: 0 }}
-            className="absolute left-2 right-2 top-2 z-10 pointer-events-none sm:left-3 sm:right-3"
+            className="absolute bottom-3 left-2 right-2 z-20 pointer-events-none sm:left-3 sm:right-3"
           >
-            <div className="pointer-events-auto mx-auto max-w-lg overflow-hidden rounded-[1.4rem] border border-white/10 bg-slate-950/72 px-3 py-2 shadow-2xl shadow-slate-950/35 backdrop-blur-xl">
-              <div className="flex items-center gap-2.5">
-                <div className="grid h-11 w-11 shrink-0 place-items-center rounded-[1.1rem] bg-gradient-to-br from-emerald-300 to-cyan-400 text-xs font-black text-slate-950 shadow-lg shadow-cyan-500/20">
+            <div className="pointer-events-auto mx-auto max-w-lg overflow-hidden rounded-[1.4rem] border border-white/10 bg-slate-950/82 px-3 py-2 shadow-2xl shadow-slate-950/45 backdrop-blur-xl">
+              <button
+                type="button"
+                onClick={() => setRouteHudExpanded((value) => !value)}
+                className="flex w-full items-center gap-2.5 text-left"
+                aria-expanded={routeHudExpanded}
+              >
+                <span className="grid h-11 w-11 shrink-0 place-items-center rounded-[1.1rem] bg-gradient-to-br from-emerald-300 to-cyan-400 text-xs font-black text-slate-950 shadow-lg shadow-cyan-500/20">
                   {completedCount}/{totalCount}
-                </div>
+                </span>
 
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2 text-[10px] font-black uppercase text-cyan-100">
@@ -232,9 +246,9 @@ export default function DashboardPage() {
                       </span>
                     )}
                   </div>
-                  <h2 className="truncate text-sm font-black leading-tight text-white sm:text-base">
+                  <div className="block truncate text-sm font-black leading-tight text-white sm:text-base">
                     {currentConsultation?.title || currentMapInfo?.consultationTitle || 'My Consultation'}
-                  </h2>
+                  </div>
                   <div className="mt-1 flex items-center gap-2">
                     <div className="h-2 flex-1 overflow-hidden rounded-full border border-white/10 bg-slate-950/70">
                       <motion.div
@@ -252,45 +266,77 @@ export default function DashboardPage() {
                   </div>
                 </div>
 
-                {consultations.length > 1 && (
-                  <button
-                    onClick={() => setShowConsultationSelector(true)}
-                    className="grid h-10 w-10 shrink-0 place-items-center rounded-[1rem] border border-white/10 bg-white/10 text-white shadow-lg transition hover:bg-cyan-400/20"
-                    title="Switch consultation"
-                  >
-                    <RefreshCw className="h-4 w-4" />
-                  </button>
-                )}
-              </div>
+                <span className="grid h-9 w-9 shrink-0 place-items-center rounded-[1rem] border border-white/10 bg-white/10 text-white">
+                  {routeHudExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronUp className="h-4 w-4" />}
+                </span>
+              </button>
+
+              {routeHudExpanded && (
+                <motion.div
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: 'auto' }}
+                  className="mt-3 overflow-hidden border-t border-white/10 pt-3"
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-xs font-semibold text-slate-300">
+                      {totalCount - completedCount > 0
+                        ? `${totalCount - completedCount} quests left on this route`
+                        : 'Route complete. Claim your momentum!'}
+                    </p>
+                    {consultations.length > 1 && (
+                      <button
+                        onClick={() => setShowConsultationSelector(true)}
+                        className="grid h-10 w-10 shrink-0 place-items-center rounded-[1rem] border border-white/10 bg-white/10 text-white shadow-lg transition hover:bg-cyan-400/20"
+                        title="Switch consultation"
+                      >
+                        <RefreshCw className="h-4 w-4" />
+                      </button>
+                    )}
+                  </div>
+                  {currentMapInfo && currentMaps.length > 1 && (
+                    <div className="mt-3 flex items-center gap-2">
+                      <button
+                        onClick={handlePrevMap}
+                        disabled={!hasPrevMap}
+                        className="inline-flex flex-1 items-center justify-center gap-1 rounded-2xl border border-white/10 bg-white/10 px-3 py-2 text-[11px] font-bold text-white transition hover:bg-white/15 disabled:cursor-not-allowed disabled:opacity-40"
+                      >
+                        <ChevronLeft className="h-3.5 w-3.5" />
+                        Back
+                      </button>
+                      <button
+                        onClick={handleNextMap}
+                        disabled={!hasNextMap}
+                        className="inline-flex flex-1 items-center justify-center gap-1 rounded-2xl border border-white/10 bg-white/10 px-3 py-2 text-[11px] font-bold text-white transition hover:bg-white/15 disabled:cursor-not-allowed disabled:opacity-40"
+                      >
+                        Next
+                        <ChevronRight className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  )}
+                </motion.div>
+              )}
             </div>
-            {currentMapInfo && currentMaps.length > 1 && (
-              <div className="pointer-events-auto mt-2 flex items-center justify-center gap-2">
-                <button
-                  onClick={handlePrevMap}
-                  disabled={!hasPrevMap}
-                  className="inline-flex items-center gap-1 rounded-2xl border border-white/10 bg-slate-950/74 px-3 py-2 text-[11px] font-bold text-white backdrop-blur transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40"
-                >
-                  <ChevronLeft className="h-3.5 w-3.5" />
-                  Back
-                </button>
-                <button
-                  onClick={handleNextMap}
-                  disabled={!hasNextMap}
-                  className="inline-flex items-center gap-1 rounded-2xl border border-white/10 bg-slate-950/74 px-3 py-2 text-[11px] font-bold text-white backdrop-blur transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40"
-                >
-                  Next
-                  <ChevronRight className="h-3.5 w-3.5" />
-                </button>
-              </div>
-            )}
           </motion.div>
+
+          {consultations.length > 1 && !routeHudExpanded && (
+            <div className="absolute left-3 top-3 z-20">
+              <button
+                onClick={() => setShowConsultationSelector(true)}
+                className="grid h-10 w-10 shrink-0 place-items-center rounded-[1rem] border border-white/10 bg-slate-950/70 text-white shadow-lg shadow-slate-950/35 backdrop-blur-xl transition hover:bg-cyan-400/20"
+                title="Switch consultation"
+              >
+                <RefreshCw className="h-4 w-4" />
+              </button>
+            </div>
+          )}
 
           <motion.button
             initial={{ opacity: 0, y: 14 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.2 }}
             onClick={() => setShowDoctorChat(true)}
-            className="absolute bottom-4 right-3 z-20 inline-flex max-w-[calc(100%-1.5rem)] items-center gap-2 rounded-[1.35rem] border border-cyan-200/30 bg-slate-950/82 px-3 py-2 text-left text-white shadow-2xl shadow-slate-950/40 backdrop-blur-xl transition hover:-translate-y-0.5 hover:border-cyan-200/60 hover:bg-slate-900/90 sm:right-4"
+            className="absolute right-3 z-20 inline-flex max-w-[calc(100%-1.5rem)] items-center gap-2 rounded-[1.35rem] border border-cyan-200/30 bg-slate-950/82 px-3 py-2 text-left text-white shadow-2xl shadow-slate-950/40 backdrop-blur-xl transition hover:-translate-y-0.5 hover:border-cyan-200/60 hover:bg-slate-900/90 sm:right-4"
+            style={{ bottom: routeHudExpanded ? '9.5rem' : '5.5rem' }}
           >
             <span className="grid h-10 w-10 shrink-0 place-items-center rounded-[1rem] bg-gradient-to-br from-cyan-300 to-blue-500 text-slate-950 shadow-lg shadow-cyan-500/20">
               <Stethoscope className="h-5 w-5" />

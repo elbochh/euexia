@@ -480,7 +480,8 @@ Rules:
 3) sequenceId: unique per medication/routine; events with same sequenceId and increasing orderInGroup unlock sequentially.
 4) starGroupId: same calendar day share same starGroupId (YYYY-MM-DD).
 5) title: short action + name. description: full dose/timing/timeframe details.
-6) Output MUST be only a JSON array.
+6) The first event in the array must be completable immediately. Set its unlockAt to "${nowIso}" and orderInGroup to 0.
+7) Output MUST be only a JSON array.
 
 Each event:
 {"title":"string","description":"string","category":"medication|nutrition|exercise|monitoring|appointment|test|lifestyle|general","xpReward":5-30,"coinReward":3-15,"unlockAt":"ISO 8601","groupId":"string","sequenceId":"string","starGroupId":"string","orderInGroup":0}
