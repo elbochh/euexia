@@ -111,7 +111,17 @@ async function renderKenneyModelToSpriteSheet(
       mixer.setTime(t);
     }
     renderer.render(scene, camera);
-    sheetCtx.drawImage(renderer.domElement, 0, 0, frameWidth, frameHeight, i * frameWidth, 0, frameWidth, frameHeight);
+    sheetCtx.drawImage(
+      renderer.domElement,
+      0,
+      0,
+      renderer.domElement.width,
+      renderer.domElement.height,
+      i * frameWidth,
+      0,
+      frameWidth,
+      frameHeight
+    );
   }
 
   renderer.dispose();

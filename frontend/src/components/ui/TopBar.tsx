@@ -22,16 +22,16 @@ export default function TopBar() {
     <motion.div
       initial={{ y: -60 }}
       animate={{ y: 0 }}
-      className="fixed left-0 right-0 top-0 z-50 px-3 pb-2 pt-2"
+      className="fixed left-0 right-0 top-0 z-40 px-3 pb-1.5 pt-2"
     >
       <div className="quest-shell">
-        <div className="relative overflow-hidden rounded-[1.7rem] border border-white/10 bg-slate-950/70 px-3 py-2 shadow-2xl shadow-slate-950/45 backdrop-blur-xl">
+        <div className="relative overflow-hidden rounded-[1.4rem] border border-white/10 bg-slate-950/72 px-2.5 py-1.5 shadow-2xl shadow-slate-950/40 backdrop-blur-xl">
           <div className="absolute inset-x-8 top-0 h-px bg-gradient-to-r from-transparent via-cyan-200/60 to-transparent" />
           <div className="flex items-center gap-2.5">
         {/* Level Badge */}
         <div className="relative flex-shrink-0">
           <div className="absolute inset-0 rounded-full bg-orange-300/30 blur-md" />
-          <div className="level-badge relative h-11 w-11 text-sm">
+          <div className="level-badge relative h-10 w-10 text-sm">
             {progress?.level || 1}
           </div>
         </div>
@@ -46,7 +46,7 @@ export default function TopBar() {
               {progress?.xp || 0} XP
             </span>
           </div>
-          <div className="relative h-3 overflow-hidden rounded-full border border-white/10 bg-slate-950/80">
+          <div className="relative h-2.5 overflow-hidden rounded-full border border-white/10 bg-slate-950/80">
             <motion.div
               className="h-full rounded-full"
               style={{
@@ -62,7 +62,7 @@ export default function TopBar() {
         </div>
 
         {/* Coins */}
-        <div className="coin-badge h-10 flex-shrink-0 px-3 text-xs">
+        <div className="coin-badge h-9 flex-shrink-0 px-3 text-xs">
           <span className="text-sm">🪙</span>
           {progress?.coins || 0}
         </div>
@@ -79,13 +79,13 @@ export default function TopBar() {
         <button
           type="button"
           onClick={handleProfileClick}
-          className="ml-1 w-9 h-9 rounded-2xl overflow-hidden border border-slate-400/60 bg-slate-900 flex-shrink-0 flex items-center justify-center hover:scale-[1.03] hover:border-blue-400 transition"
+          className="ml-1 w-8 h-8 rounded-[1rem] overflow-hidden border border-slate-400/60 bg-slate-900 flex-shrink-0 flex items-center justify-center hover:scale-[1.03] hover:border-blue-400 transition"
         >
           <Image
             src={getCharacterSpriteSrc(characterId)}
             alt="Profile character"
-            width={32}
-            height={32}
+            width={30}
+            height={30}
             className="object-contain"
           />
         </button>

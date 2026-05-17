@@ -18,10 +18,10 @@ export default function BottomNav() {
     <motion.nav
       initial={{ y: 80 }}
       animate={{ y: 0 }}
-      className="fixed bottom-0 left-0 right-0 z-50 px-3 pb-3"
+      className="fixed bottom-0 left-0 right-0 z-50 px-3 pb-2"
     >
       <div className="quest-shell">
-        <div className="relative flex items-center justify-around rounded-[2rem] border border-white/10 bg-slate-950/78 px-2 py-2 shadow-2xl shadow-slate-950/50 backdrop-blur-xl">
+        <div className="relative flex items-center justify-around rounded-[1.65rem] border border-white/10 bg-slate-950/80 px-2 py-1.5 shadow-2xl shadow-slate-950/50 backdrop-blur-xl">
           <div className="absolute inset-x-10 top-0 h-px bg-gradient-to-r from-transparent via-white/45 to-transparent" />
         {navItems.map((item) => {
           const isActive = pathname === item.path;
@@ -29,7 +29,7 @@ export default function BottomNav() {
             <button
               key={item.path}
               onClick={() => router.push(item.path)}
-              className={`relative flex min-w-0 flex-1 flex-col items-center gap-1 rounded-2xl px-1 py-2 transition-all ${
+              className={`relative flex min-w-0 flex-1 flex-col items-center gap-1 rounded-[1.25rem] px-1 py-1.5 transition-all ${
                 isActive
                   ? 'scale-[1.04] text-white'
                   : 'text-slate-500 opacity-80 hover:bg-white/5 hover:text-slate-200'
@@ -38,7 +38,7 @@ export default function BottomNav() {
               {isActive && (
                 <motion.div
                   layoutId="navActiveBubble"
-                  className={`absolute inset-1 rounded-2xl bg-gradient-to-b ${item.accent} opacity-95 shadow-lg shadow-cyan-500/15`}
+                  className={`absolute inset-1 rounded-[1.1rem] bg-gradient-to-b ${item.accent} opacity-95 shadow-lg shadow-cyan-500/15`}
                 />
               )}
               <span className="relative text-2xl leading-none drop-shadow">{item.icon}</span>

@@ -132,10 +132,10 @@ export default function GameCanvas({
       maxScrollYRef.current = 0;
 
       // ═══════════════════════════════════════════════════════════════════════
-      // PROCEDURAL ISLAND — 38-row tall map with meandering river, 3 biomes
-      //   Bottom (rows 26-37): Autumn / dirt
-      //   Middle (rows 13-25): Green / grass
-      //   Top    (rows 0-12):  Snow / ice
+      // PROCEDURAL ISLAND — 48-row tall map with meandering river, 3 biomes
+      //   Bottom (rows 32-47): Autumn / dirt
+      //   Middle (rows 16-31): Green / grass
+      //   Top    (rows 0-15):  Snow / ice
       // ═══════════════════════════════════════════════════════════════════════
 
       const _W = 1, _D = 2, _G = 3, _S = 4, _T = 5, _N = 6, _A = 7;
@@ -145,8 +145,12 @@ export default function GameCanvas({
         const h = ((a * 1664525 + b * 1013904223) ^ (a << 16)) & 0xffffffff;
         return (h >>> 0) / 0xffffffff;
       };
+      const clamp = (v: number, mn: number, mx: number) => {
+        if (mn > mx) return (mn + mx) / 2;
+        return Math.max(mn, Math.min(mx, v));
+      };
 
-      const TOTAL_ROWS = 38;
+      const TOTAL_ROWS = 48;
       const GRID_COLS = 12;
 
       // River center column per row (meanders via sine wave)
@@ -175,7 +179,7 @@ export default function GameCanvas({
         const cells: Cell[] = [];
         const rc = riverCol[row];
         const [bL, bR] = bounds[row];
-        const biome = row < 13 ? 0 : row < 26 ? 1 : 2; // 0=snow, 1=green, 2=autumn
+        const biome = row < 16 ? 0 : row < 32 ? 1 : 2; // 0=snow, 1=green, 2=autumn
 
         for (let col = 0; col < GRID_COLS; col++) {
           if (col < bL || col > bR) { cells.push(null); continue; }
@@ -221,8 +225,8 @@ export default function GameCanvas({
       const STACK_H = Math.floor(tileH * 0.5);
       const rowStep = Math.floor(tileH * 0.55);
 
-      const PADDING_TOP = 80;
-      const PADDING_BOT = 100;
+      const PADDING_TOP = 150;
+      const PADDING_BOT = 180;
       const gridContentH = GRID_ROWS * rowStep + 4 * STACK_H + tileH;
       const mapHeight = gridContentH + PADDING_TOP + PADDING_BOT;
 
@@ -516,30 +520,44 @@ export default function GameCanvas({
       const COIN_R = Math.min(28, Math.max(18, Math.floor(width * 0.068)));
       const COIN_FLOAT = 25;
 
-      // Waypoints zigzagging across the river (all verified on land cells)
-      const FULL_PATH = [
-        { row: 37, col: 3 },
-        { row: 34, col: 10 },
-        { row: 31, col: 3 },
-        { row: 28, col: 10 },
-        { row: 25, col: 3 },
-        { row: 22, col: 8 },
-        { row: 19, col: 0 },
-        { row: 16, col: 8 },
-        { row: 13, col: 1 },
-        { row: 10, col: 9 },
-        { row: 7, col: 3 },
-        { row: 4, col: 10 },
-        { row: 1, col: 5 },
-      ];
+      const routeRows = [47, 44, 41, 38, 35, 32, 29, 26, 23, 20, 17, 14, 11, 8, 5, 2];
+      const findRouteCell = (row: number, index: number) => {
+        const safeRow = clamp(row, 0, GRID_ROWS - 1);
+        const [left, right] = bounds[safeRow];
+        const rc = riverCol[safeRow];
+        const side = index % 2 === 0 ? -1 : 1;
+        const preferred = clamp(rc + side * (3 + (index % 3 === 0 ? 1 : 0)), left, right);
+
+        for (let radius = 0; radius < GRID_COLS; radius += 1) {
+          const candidates = radius === 0 ? [preferred] : [preferred - radius, preferred + radius];
+          for (const c of candidates) {
+            const col = clamp(c, left, right);
+            const cell = ISLAND[safeRow]?.[col];
+            if (cell && cell[0] !== _W) return { row: safeRow, col };
+          }
+        }
+
+        for (let col = left; col <= right; col += 1) {
+          const cell = ISLAND[safeRow]?.[col];
+          if (cell && cell[0] !== _W) return { row: safeRow, col };
+        }
+        return { row: safeRow, col: left };
+      };
+
+      const FULL_PATH = routeRows.map((row, index) => findRouteCell(row, index));
 
       const pickPositions = (count: number) => {
         if (count <= 1) return [FULL_PATH[0]];
         const result: { row: number; col: number }[] = [];
         for (let i = 0; i < count; i++) {
           const t = i / (count - 1);
-          const idx = Math.min(Math.round(t * (FULL_PATH.length - 1)), FULL_PATH.length - 1);
-          result.push(FULL_PATH[idx]);
+          if (count <= FULL_PATH.length) {
+            const idx = Math.min(Math.round(t * (FULL_PATH.length - 1)), FULL_PATH.length - 1);
+            result.push(FULL_PATH[idx]);
+          } else {
+            const row = Math.round((TOTAL_ROWS - 1) - t * (TOTAL_ROWS - 3));
+            result.push(findRouteCell(row, i));
+          }
         }
         return result;
       };
@@ -560,6 +578,11 @@ export default function GameCanvas({
         x: starPixels[starPixels.length - 1].x,
         y: starPixels[starPixels.length - 1].y - 40,
       };
+
+      const initialFocusIdx = Math.max(-1, Math.min(completed - 1, starCount - 1));
+      const initialFocus = initialFocusIdx < 0 ? startFlagPixel : starPixels[initialFocusIdx];
+      scrollYRef.current = clamp(initialFocus.y - height * 0.62, 0, maxScrollYRef.current);
+      scrollContainer.y = -scrollYRef.current;
 
       // ── Dotted path (quadratic Bézier arcs between nodes) ─────────────────
       const allPathPts = [startFlagPixel, ...starPixels, endFlagPixel];
@@ -794,8 +817,9 @@ export default function GameCanvas({
       // ═══════════════════════════════════════════════════════════════════════
       // CHARACTER SETUP
       // ═══════════════════════════════════════════════════════════════════════
-      const characterTargetHeight = Math.max(50, Math.min(72, tileH * 1.3));
-      const CHAR_SIDE_GAP = COIN_R + 36; // clearance from coin edge to character centre
+      const characterTargetHeight = Math.max(58, Math.min(86, tileH * 1.45));
+      const CHAR_SIDE_GAP = COIN_R + 44; // clearance from coin edge to character centre
+      const CHAR_EDGE_PAD = characterTargetHeight * 0.42 + 8;
 
       const getStarPixel = (idx: number): { x: number; y: number } => {
         if (idx < 0) return startFlagPixel;
@@ -803,12 +827,10 @@ export default function GameCanvas({
         return starPixels[idx];
       };
 
-      const clamp = (v: number, mn: number, mx: number) => Math.max(mn, Math.min(mx, v));
-
       // Player: always to the LEFT of current star (clamped so never offscreen)
       const getPlayerPos = (starIdx: number) => {
         const { x: sx, y: sy } = getStarPixel(starIdx);
-        const px = clamp(sx - CHAR_SIDE_GAP, 18, width - 18);
+        const px = clamp(sx - CHAR_SIDE_GAP, CHAR_EDGE_PAD, width - CHAR_EDGE_PAD);
         return { x: px, y: sy + COIN_FLOAT + 8 };
       };
 
@@ -816,7 +838,7 @@ export default function GameCanvas({
       // (trailing = same index as player but opposite side)
       const getDoctorPos = (starIdx: number) => {
         const { x: sx, y: sy } = getStarPixel(starIdx);
-        const dx = clamp(sx + CHAR_SIDE_GAP, 18, width - 18);
+        const dx = clamp(sx + CHAR_SIDE_GAP, CHAR_EDGE_PAD, width - CHAR_EDGE_PAD);
         return { x: dx, y: sy + COIN_FLOAT + 8 };
       };
 
@@ -899,6 +921,34 @@ export default function GameCanvas({
       const doctor = new Container();
       doctor.eventMode = 'static'; doctor.cursor = 'pointer';
       doctor.on('pointertap', () => (window as any).__openDoctorChat?.());
+      const addDoctorCue = (target: Container, x: number, y: number) => {
+        const cue = new Container();
+        cue.position.set(x, y);
+        const cueTail = new Graphics();
+        cueTail.moveTo(-4, 9);
+        cueTail.lineTo(5, 18);
+        cueTail.lineTo(10, 8);
+        cueTail.closePath();
+        cueTail.fill({ color: 0xf8fafc, alpha: 0.96 });
+        cueTail.stroke({ color: 0x38bdf8, width: 1.5, alpha: 0.65 });
+        const cueBg = new Graphics();
+        cueBg.roundRect(-24, -14, 48, 24, 10);
+        cueBg.fill({ color: 0xf8fafc, alpha: 0.96 });
+        cueBg.stroke({ color: 0x38bdf8, width: 2, alpha: 0.8 });
+        const cueText = new Text({
+          text: 'ASK',
+          style: new TextStyle({
+            fontSize: 11,
+            fill: '#0f172a',
+            fontFamily: 'Arial',
+            fontWeight: 'bold',
+          }),
+        });
+        cueText.anchor.set(0.5);
+        cueText.position.set(0, -2);
+        cue.addChild(cueTail, cueBg, cueText);
+        target.addChild(cue);
+      };
       let pulseIndicator: Graphics;
       let clickableGlow: Graphics;
       const docOutline = { color: 0x000000, width: 2.5 };
@@ -915,7 +965,7 @@ export default function GameCanvas({
       const dSteth = new Graphics(); dSteth.roundRect(-2.5, 2, 5, 14, 2); dSteth.stroke({ color: 0x64748b, width: 2.5 }); dSteth.circle(0, 17, 4); dSteth.stroke({ color: 0x64748b, width: 2.5 }); dSteth.circle(0, 17, 1.5); dSteth.fill(0x94a3b8); doctor.addChild(dSteth);
       clickableGlow = new Graphics(); clickableGlow.circle(0, 0, 35); clickableGlow.fill({ color: 0x3b82f6, alpha: 0.15 }); doctor.addChildAt(clickableGlow, 0);
       pulseIndicator = new Graphics(); pulseIndicator.circle(0, 18, 2); pulseIndicator.fill({ color: 0xef4444, alpha: 0.8 }); doctor.addChild(pulseIndicator);
-      const chatHint = new Text({ text: '💬', style: new TextStyle({ fontSize: 14, fontFamily: 'Arial' }) }); chatHint.anchor.set(0.5); chatHint.position.set(0, -35); doctor.addChild(chatHint);
+      addDoctorCue(doctor, 24, -52);
 
       const doctorFrames =
         (await loadAnimationFrames('doctor', 'idle')) ??
@@ -928,7 +978,7 @@ export default function GameCanvas({
         const ds2 = new Graphics(); ds2.ellipse(0, 0, 10, 5); ds2.fill({ color: 0x000000, alpha: 0.2 }); doctor.addChild(ds2);
         const dSpr = new AnimatedSprite(doctorFrames); dSpr.anchor.set(0.5, 1); dSpr.scale.set(characterTargetHeight / Math.max(doctorFrames[0].height || 1, 1)); dSpr.animationSpeed = doctorFrames.length > 1 ? 0.16 : 0; if (doctorFrames.length > 1) dSpr.play(); doctor.addChild(dSpr);
         pulseIndicator = new Graphics(); pulseIndicator.circle(0, 20, 2.2); pulseIndicator.fill({ color: 0xef4444, alpha: 0.8 }); doctor.addChild(pulseIndicator);
-        const dHint = new Text({ text: '💬', style: new TextStyle({ fontSize: 14, fontFamily: 'Arial' }) }); dHint.anchor.set(0.5); dHint.position.set(0, -42); doctor.addChild(dHint);
+        addDoctorCue(doctor, 28, -(characterTargetHeight + 28));
       }
 
       // Name label above doctor — outlined game-style text
@@ -952,7 +1002,7 @@ export default function GameCanvas({
       if (introMessage) {
         const originalPlayerX = player.position.x;
         const originalDoctorX = doctorContainer.position.x + doctor.position.x;
-        const startOffset = 220;
+        const startOffset = Math.min(220, width * 0.48);
         player.position.x = originalPlayerX - startOffset;
         doctorContainer.position.x -= startOffset;
 
@@ -1176,7 +1226,7 @@ export default function GameCanvas({
   return (
     <div
       ref={containerRef}
-      className="h-full w-full overflow-hidden rounded-t-[2rem] shadow-inner"
+      className="h-full w-full overflow-hidden shadow-inner"
       style={{
         background:
           'radial-gradient(circle at 20% 10%, rgba(186,230,253,0.22), transparent 18rem), linear-gradient(180deg, #446f9b 0%, #5b8db5 100%)',
