@@ -1,0 +1,74 @@
+name: Deploy to Google Cloud Run
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: cloud-run-production
+  cancel-in-progress: true
+
+env:
+  GCP_PROJECT_ID: project-f4cb911b-5b50-4b6e-9d6
+  GCP_REGION: us-central1
+  BACKEND_SERVICE: euexia-backend
+  FRONTEND_SERVICE: euexia-frontend
+
+jobs:
+  deploy:
+    name: Build and deploy Cloud Run services
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ env.GCP_PROJECT_ID }}
+
+      - name: Deploy backend to Cloud Run
+        run: |
+          gcloud run deploy "$BACKEND_SERVICE" \
+            --source backend \
+            --region "$GCP_REGION" \
+            --platform managed \
+            --project "$GCP_PROJECT_ID" \
+            --quiet
+
+      - name: Deploy frontend to Cloud Run
+        run: |
+          gcloud run deploy "$FRONTEND_SERVICE" \
+            --source frontend \
+            --region "$GCP_REGION" \
+            --platform managed \
+            --project "$GCP_PROJECT_ID" \
+            --quiet
+
+      - name: Verify deployed services
+        run: |
+          BACKEND_URL=$(gcloud run services describe "$BACKEND_SERVICE" \
+            --region "$GCP_REGION" \
+            --project "$GCP_PROJECT_ID" \
+            --format='value(status.url)')
+          FRONTEND_URL=$(gcloud run services describe "$FRONTEND_SERVICE" \
+            --region "$GCP_REGION" \
+            --project "$GCP_PROJECT_ID" \
+            --format='value(status.url)')
+
+          curl --fail --silent --show-error "$BACKEND_URL/api/health"
+          curl --fail --silent --show-error --output /dev/null "$FRONTEND_URL"
+
+          echo "Backend: $BACKEND_URL"
+          echo "Frontend: $FRONTEND_URL"

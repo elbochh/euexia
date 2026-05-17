@@ -168,8 +168,12 @@ export default function GameCanvas({
         else if (r <= 3) left = 3;
         else if (r <= 6) left = 2;
         else if (r <= 12) left = 1;
-        if (r >= 36) { left = Math.max(left, 2); right = Math.min(right, 9); }
-        else if (r >= 35) { left = Math.max(left, 1); right = Math.min(right, 10); }
+        if (r >= 34) {
+          const t = (r - 34) / (TOTAL_ROWS - 1 - 34);
+          const curveInset = Math.round(t * t * 3);
+          left = Math.max(left, 1 + curveInset + (r >= 45 ? 1 : 0));
+          right = Math.min(right, 10 - curveInset - (r >= 46 ? 1 : 0));
+        }
         bounds.push([left, right]);
       }
 
@@ -251,7 +255,7 @@ export default function GameCanvas({
       const [
         texGrassFull, texDirtFull, texSandFull, texSnowFull,
         texStoneFull, texWaterFull, texAutumnFull,
-        texWaterFlat,
+        texWaterFlat, texWaterShadow, texWaveWater,
         texTreeGreenLow, texTreeGreenMid, texTreeGreenHigh,
         texPineGreenLow, texPineGreenMid, texPineGreenHigh,
         texPineBlueLow, texPineBlueMid, texPineBlueHigh,
@@ -272,7 +276,8 @@ export default function GameCanvas({
         loadTex(`${P}tileSand_full.png`),  loadTex(`${P}tileSnow_full.png`),
         loadTex(`${P}tileStone_full.png`), loadTex(`${P}tileWater_full.png`),
         loadTex(`${P}tileAutumn_full.png`),
-        loadTex(`${P}tileWater.png`),
+        loadTex(`${P}tileWater.png`), loadTex(`${P}tileWater_shadow.png`),
+        loadTex(`${P}waveWater.png`),
         loadTex(`${P}treeGreen_low.png`),  loadTex(`${P}treeGreen_mid.png`),
         loadTex(`${P}treeGreen_high.png`),
         loadTex(`${P}pineGreen_low.png`),  loadTex(`${P}pineGreen_mid.png`),
@@ -386,6 +391,77 @@ export default function GameCanvas({
         islandShadow.fill({ color: 0x082f49, alpha: 0.08 });
       }
       tileLayer.addChild(islandShadow);
+
+      const shorelineLayer = new Container();
+      const shorelineWash = new Graphics();
+      for (let row = 0; row < GRID_ROWS; row++) {
+        const [left, right] = bounds[row];
+        const edgeAlpha = row >= 34 ? 0.26 : 0.15;
+        let firstLand = -1;
+        let lastLand = -1;
+        for (let col = left; col <= right; col++) {
+          const cell = ISLAND[row]?.[col];
+          if (cell && cell[0] !== _W) {
+            if (firstLand === -1) firstLand = col;
+            lastLand = col;
+          }
+        }
+
+        if (firstLand !== -1) {
+          const { x, y } = hexPos(row, firstLand);
+          shorelineWash.ellipse(x - tileW * 0.45, y + tileH * 0.12, tileW * 0.34, tileH * 0.09);
+          shorelineWash.fill({ color: 0xbdefff, alpha: edgeAlpha });
+        }
+        if (lastLand !== -1 && lastLand !== firstLand) {
+          const { x, y } = hexPos(row, lastLand);
+          shorelineWash.ellipse(x + tileW * 0.45, y + tileH * 0.12, tileW * 0.34, tileH * 0.09);
+          shorelineWash.fill({ color: 0xbdefff, alpha: edgeAlpha });
+        }
+
+        for (let col = left; col <= right; col++) {
+          const cell = ISLAND[row]?.[col];
+          if (!cell || cell[0] === _W) continue;
+          const nextRowCell = ISLAND[row + 1]?.[col];
+          if (row >= 40 && (!nextRowCell || nextRowCell[0] === _W)) {
+            const { x, y } = hexPos(row, col);
+            shorelineWash.ellipse(x, y + tileH * 0.38, tileW * 0.34, tileH * 0.08);
+            shorelineWash.fill({ color: 0xdcfffb, alpha: 0.22 });
+          }
+        }
+      }
+      shorelineLayer.addChild(shorelineWash);
+
+      if (texWaterShadow || texWaveWater) {
+        for (let row = 34; row < GRID_ROWS; row += 2) {
+          const [left, right] = bounds[row];
+          let firstLand = -1;
+          let lastLand = -1;
+          for (let col = left; col <= right; col++) {
+            const cell = ISLAND[row]?.[col];
+            if (cell && cell[0] !== _W) {
+              if (firstLand === -1) firstLand = col;
+              lastLand = col;
+            }
+          }
+          const shoreEdges = lastLand === firstLand
+            ? [[firstLand, 1]]
+            : [[firstLand, -1], [lastLand, 1]];
+          for (const [col, side] of shoreEdges as Array<[number, number]>) {
+            if (col < 0) continue;
+            const { x, y } = hexPos(row, col);
+            const tex = texWaveWater || texWaterShadow;
+            if (!tex) continue;
+            const wave = new Sprite(tex);
+            wave.anchor.set(0.5);
+            wave.scale.set((tileW / Math.max(tex.width, 1)) * 0.72);
+            wave.position.set(x + side * tileW * 0.56, y + tileH * 0.12);
+            wave.rotation = side * 0.35;
+            wave.alpha = 0.24;
+            shorelineLayer.addChild(wave);
+          }
+        }
+      }
+      tileLayer.addChild(shorelineLayer);
 
       for (let row = 0; row < GRID_ROWS; row++) {
         for (let col = 0; col < GRID_COLS; col++) {
