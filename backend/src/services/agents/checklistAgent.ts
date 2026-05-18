@@ -847,6 +847,42 @@ function sortEventsBySchedule(events: ChecklistEventData[]): ChecklistEventData[
   });
 }
 
+function medicationDoseKey(event: ChecklistEventData): string {
+  const unlock = new Date(event.unlockAt);
+  const day = isNaN(unlock.getTime()) ? 'unknown-day' : localDateKey(unlock);
+  const hour = isNaN(unlock.getTime()) ? 'unknown-hour' : String(unlock.getHours()).padStart(2, '0');
+  const title = cleanTitle(event.title).toLowerCase().replace(/\(\d+\/\d+\)$/g, '').trim();
+  return `${title}_${day}_${hour}`;
+}
+
+function dedupeMedicationDoseEvents(events: ChecklistEventData[]): ChecklistEventData[] {
+  const byDose = new Map<string, ChecklistEventData>();
+  const nonMedication: ChecklistEventData[] = [];
+
+  for (const event of events) {
+    if (event.category !== 'medication') {
+      nonMedication.push(event);
+      continue;
+    }
+
+    const key = medicationDoseKey(event);
+    const existing = byDose.get(key);
+    if (!existing) {
+      byDose.set(key, event);
+      continue;
+    }
+
+    const existingScore = [existing.description, existing.durationDays, existing.durationIsExplicit].filter(Boolean).length;
+    const nextScore = [event.description, event.durationDays, event.durationIsExplicit].filter(Boolean).length;
+    if (nextScore > existingScore) {
+      byDose.set(key, event);
+    }
+    console.warn(`[Checklist] Duplicate medication dose filtered: ${event.title} (${key})`);
+  }
+
+  return [...byDose.values(), ...nonMedication];
+}
+
 function normalizeNonMedicationTime(unlockAt: string, category: string): string {
   if (category === 'medication') return unlockAt;
 
@@ -966,8 +1002,9 @@ export async function structureChecklistAsEvents(
       const combinedEvents = deterministicMedicationEvents.length > 0
         ? [...deterministicMedicationEvents, ...events.filter((event) => event.category !== 'medication')]
         : events;
-      console.log(`[Checklist] structureChecklistAsEvents: ${combinedEvents.length} events after medication expansion`);
-      return sortEventsBySchedule(combinedEvents);
+      const dedupedCombinedEvents = dedupeMedicationDoseEvents(combinedEvents);
+      console.log(`[Checklist] structureChecklistAsEvents: ${dedupedCombinedEvents.length} events after medication expansion`);
+      return sortEventsBySchedule(dedupedCombinedEvents);
     }
   } catch (err: any) {
     console.warn('[Checklist] structureChecklistAsEvents failed:', err.message);
@@ -1003,10 +1040,10 @@ export async function structureChecklistAsEvents(
   }
   console.log(`[Checklist] structureChecklistAsEvents fallback: ${fallback.length} events`);
   if (deterministicMedicationEvents.length > 0) {
-    return sortEventsBySchedule([
+    return sortEventsBySchedule(dedupeMedicationDoseEvents([
       ...deterministicMedicationEvents,
       ...fallback.filter((event) => event.category !== 'medication'),
-    ]);
+    ]));
   }
   return fallback.length > 0 ? fallback : [{
     title: 'Follow care plan',

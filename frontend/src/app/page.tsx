@@ -92,8 +92,8 @@ export default function HomePage() {
               top: orb.top,
               background:
                 i % 2 === 0
-                  ? 'rgba(34, 197, 94, 0.18)'
-                  : 'rgba(56, 189, 248, 0.18)',
+                  ? 'rgba(0, 167, 165, 0.12)'
+                  : 'rgba(20, 102, 200, 0.10)',
               animationDelay: `${orb.delay}s`,
             }}
           />
@@ -107,19 +107,19 @@ export default function HomePage() {
           animate={{ opacity: 1, y: 0 }}
           className="mb-6 text-center"
         >
-          <div className="mx-auto mb-4 flex h-24 w-24 items-center justify-center rounded-[2rem] border border-white/15 bg-white/10 text-6xl shadow-2xl shadow-cyan-500/10">
+          <div className="mx-auto mb-4 flex h-24 w-24 items-center justify-center rounded-[2rem] border border-blue-100 bg-white text-6xl shadow-2xl shadow-cyan-500/10">
             🏥
           </div>
-          <div className="soft-badge mx-auto mb-3 text-cyan-100">
-            <span className="h-2 w-2 rounded-full bg-emerald-400 shadow-[0_0_12px_rgba(52,211,153,0.9)]" />
+          <div className="soft-badge mx-auto mb-3">
+            <span className="h-2 w-2 rounded-full bg-teal-500 shadow-[0_0_12px_rgba(0,167,165,0.65)]" />
             Gemma 4 health quest engine
           </div>
           <h1 className="text-5xl font-black tracking-tight">
-            <span className="bg-gradient-to-r from-emerald-300 via-cyan-200 to-violet-300 bg-clip-text text-transparent">
+            <span className="bg-gradient-to-r from-blue-700 via-cyan-600 to-teal-500 bg-clip-text text-transparent">
               Euexia
             </span>
           </h1>
-          <p className="mx-auto mt-3 max-w-sm text-sm leading-6 text-slate-300">
+          <p className="mx-auto mt-3 max-w-sm text-sm leading-6 text-slate-600">
             Turn medical follow-up instructions into a guided RPG map with quests,
             rewards, and Dr. Gemma by your side.
           </p>
@@ -131,8 +131,8 @@ export default function HomePage() {
           transition={{ delay: 0.15 }}
           className="game-panel relative overflow-hidden p-5"
         >
-          <div className="absolute -right-10 -top-10 h-32 w-32 rounded-full bg-cyan-400/10 blur-2xl" />
-          <div className="relative mb-5 grid grid-cols-2 rounded-2xl border border-white/10 bg-slate-950/40 p-1">
+          <div className="absolute -right-10 -top-10 h-32 w-32 rounded-full bg-cyan-300/20 blur-2xl" />
+          <div className="relative mb-5 grid grid-cols-2 rounded-2xl border border-blue-100 bg-blue-50 p-1">
             {['Login', 'Register'].map((tab, i) => {
               const active = (isLogin && i === 0) || (!isLogin && i === 1);
               return (
@@ -143,13 +143,13 @@ export default function HomePage() {
                     setError('');
                   }}
                   className={`relative rounded-xl py-2.5 text-sm font-bold transition-all ${
-                    active ? 'text-white' : 'text-slate-400 hover:text-slate-200'
+                    active ? 'text-white' : 'text-slate-500 hover:text-blue-700'
                   }`}
                 >
                   {active && (
                     <motion.span
                       layoutId="authTab"
-                      className="absolute inset-0 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 shadow-lg shadow-cyan-500/20"
+                      className="absolute inset-0 rounded-xl bg-gradient-to-r from-teal-500 to-blue-600 shadow-lg shadow-cyan-500/20"
                     />
                   )}
                   <span className="relative">{tab}</span>
@@ -200,7 +200,7 @@ export default function HomePage() {
               <motion.p
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
-                className="rounded-2xl border border-red-400/20 bg-red-500/10 px-3 py-2 text-center text-xs text-red-200"
+                className="rounded-2xl border border-red-200 bg-red-50 px-3 py-2 text-center text-xs text-red-600"
               >
                 {error}
               </motion.p>
@@ -230,7 +230,7 @@ export default function HomePage() {
               type="button"
               onClick={handleContinueAsGuest}
               disabled={loading}
-              className="w-full rounded-2xl border border-white/10 bg-white/5 py-3 text-sm font-bold text-slate-300 transition hover:border-cyan-300/40 hover:bg-cyan-300/10 hover:text-white disabled:opacity-50"
+              className="w-full rounded-2xl border border-blue-100 bg-white py-3 text-sm font-bold text-blue-700 shadow-sm transition hover:border-cyan-300/70 hover:bg-cyan-50 disabled:opacity-50"
             >
               Continue as guest
             </button>
@@ -248,10 +248,10 @@ export default function HomePage() {
           className="mt-5 grid grid-cols-3 gap-2"
         >
           {featureCards.map((feat) => (
-            <div key={feat.label} className="rounded-3xl border border-white/10 bg-white/[0.06] p-3 text-center backdrop-blur">
+            <div key={feat.label} className="rounded-3xl border border-blue-100 bg-white/85 p-3 text-center shadow-lg shadow-blue-900/5 backdrop-blur">
               <div className="mb-1 text-2xl">{feat.icon}</div>
-              <div className="text-[11px] font-bold text-white">{feat.label}</div>
-              <div className="mt-1 text-[9px] leading-3 text-slate-400">{feat.copy}</div>
+              <div className="text-[11px] font-bold text-[#0b1f58]">{feat.label}</div>
+              <div className="mt-1 text-[9px] leading-3 text-slate-500">{feat.copy}</div>
             </div>
           ))}
         </motion.div>

@@ -1,5 +1,5 @@
 'use client';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { motion } from 'framer-motion';
 import dynamic from 'next/dynamic';
@@ -19,6 +19,49 @@ import { useGameStore } from '@/stores/gameStore';
 import { GAME_CONFIG } from '@/lib/gameConfig';
 
 const GameCanvas = dynamic(() => import('@/components/game/GameCanvas'), { ssr: false });
+
+function medicationDayFromDescription(description?: string): string | null {
+  const match = String(description ?? '').match(/\bDay\s+(\d+)\s+of\b/i);
+  return match ? match[1] : null;
+}
+
+function normalizedMedicationTitle(title?: string): string {
+  return String(title ?? '').toLowerCase().replace(/\(\d+\/\d+\)$/g, '').replace(/\s+/g, ' ').trim();
+}
+
+function logicalChecklistKey(item: any): string {
+  if (item.category !== 'medication') return String(item._id);
+  const day = medicationDayFromDescription(item.description)
+    ?? (item.unlockAt ? new Date(item.unlockAt).toISOString().slice(0, 10) : 'today');
+  const slot = item.unlockAt
+    ? String(new Date(item.unlockAt).getHours()).padStart(2, '0')
+    : String(item.orderInGroup ?? 0);
+  return `${normalizedMedicationTitle(item.title)}_${day}_${slot}`;
+}
+
+function mergeDuplicateChecklistItems<T extends { _id?: string; order?: number; isCompleted?: boolean; isFullyDone?: boolean; isLocked?: boolean; isAvailable?: boolean; remainingSeconds?: number }>(items: T[]): T[] {
+  const byKey = new Map<string, T>();
+
+  for (const item of items) {
+    const key = logicalChecklistKey(item);
+    const existing = byKey.get(key);
+    if (!existing) {
+      byKey.set(key, item);
+      continue;
+    }
+
+    byKey.set(key, {
+      ...existing,
+      isCompleted: Boolean(existing.isCompleted || item.isCompleted),
+      isFullyDone: Boolean(existing.isFullyDone || item.isFullyDone),
+      isLocked: Boolean(existing.isLocked && item.isLocked),
+      isAvailable: Boolean(existing.isAvailable || item.isAvailable),
+      remainingSeconds: Math.min(existing.remainingSeconds ?? 0, item.remainingSeconds ?? 0),
+    });
+  }
+
+  return Array.from(byKey.values()).sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+}
 
 export default function DashboardPage() {
   const router = useRouter();
@@ -46,6 +89,12 @@ export default function DashboardPage() {
   const [routeHudExpanded, setRouteHudExpanded] = useState(false);
   const [introMessage, setIntroMessage] = useState<string | undefined>(undefined);
   const [companionMessage, setCompanionMessage] = useState<string | undefined>(undefined);
+  const [advanceKey, setAdvanceKey] = useState<string | undefined>(undefined);
+  const [completingItemIds, setCompletingItemIds] = useState<Set<string>>(() => new Set());
+  const completingItemIdsRef = useRef<Set<string>>(new Set());
+  const previousCompletedRef = useRef<number | null>(null);
+  const pendingAdvanceTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const companionMessageTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     initFromStorage();
@@ -80,6 +129,28 @@ export default function DashboardPage() {
   }, [currentMapInfo?.consultationId]);
 
   useEffect(() => {
+    previousCompletedRef.current = null;
+    if (pendingAdvanceTimeoutRef.current) clearTimeout(pendingAdvanceTimeoutRef.current);
+    if (companionMessageTimeoutRef.current) clearTimeout(companionMessageTimeoutRef.current);
+    setAdvanceKey(undefined);
+    setCompanionMessage(undefined);
+  }, [currentMapInfo?.consultationId]);
+
+  useEffect(() => {
+    if (companionMessageTimeoutRef.current) clearTimeout(companionMessageTimeoutRef.current);
+    if (!companionMessage) return;
+
+    companionMessageTimeoutRef.current = setTimeout(() => {
+      setCompanionMessage(undefined);
+      setAdvanceKey(undefined);
+    }, 8000);
+
+    return () => {
+      if (companionMessageTimeoutRef.current) clearTimeout(companionMessageTimeoutRef.current);
+    };
+  }, [companionMessage]);
+
+  useEffect(() => {
     if (typeof window !== 'undefined') {
       const token = localStorage.getItem('euexia_token');
       if (!token) {
@@ -110,32 +181,54 @@ export default function DashboardPage() {
 
   // Get checklist items (events) for current consultation
   const currentConsultationId = currentMapInfo?.consultationId;
-  const currentChecklist = currentConsultationId
-    ? checklist.filter((i) => i.consultationId === currentConsultationId)
-    : checklist;
+  const currentChecklist = useMemo(
+    () => (
+      currentConsultationId
+        ? checklist.filter((i) => i.consultationId === currentConsultationId)
+        : checklist
+    ),
+    [checklist, currentConsultationId]
+  );
+  const displayChecklist = useMemo(
+    () => mergeDuplicateChecklistItems(currentChecklist),
+    [currentChecklist]
+  );
 
   // Group events by star: starGroupId is map grouping (typically day-level)
-  const groupOrder: string[] = [];
-  const sortedByOrder = [...currentChecklist].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
-  for (const item of sortedByOrder) {
-    const g = String(item.starGroupId ?? item.groupId ?? item._id ?? '');
-    if (!groupOrder.includes(g)) groupOrder.push(g);
-  }
+  const groupOrder = useMemo(() => {
+    const groups: string[] = [];
+    const sortedByOrder = [...displayChecklist].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+    for (const item of sortedByOrder) {
+      const g = String(item.starGroupId ?? item.groupId ?? item._id ?? '');
+      if (!groups.includes(g)) groups.push(g);
+    }
+    return groups;
+  }, [displayChecklist]);
+
   // Events per star (all stars for this consultation)
-  const eventsPerStarAll: typeof currentChecklist[] = groupOrder.map((g) =>
-    currentChecklist.filter((e) => String(e.starGroupId ?? e.groupId ?? e._id ?? '') === g)
+  const eventsPerStarAll = useMemo(
+    () => groupOrder.map((g) =>
+      displayChecklist.filter((e) => String(e.starGroupId ?? e.groupId ?? e._id ?? '') === g)
+    ),
+    [displayChecklist, groupOrder]
   );
 
   // Current map shows stars [startStepIndex, endStepIndex]
   const startStepIndex = currentMapInfo?.startStepIndex ?? 0;
   const endStepIndex = currentMapInfo?.endStepIndex ?? Math.max(0, eventsPerStarAll.length - 1);
-  const mapEventsPerStar = eventsPerStarAll.slice(startStepIndex, endStepIndex + 1);
+  const mapEventsPerStar = useMemo(
+    () => eventsPerStarAll.slice(startStepIndex, endStepIndex + 1),
+    [eventsPerStarAll, startStepIndex, endStepIndex]
+  );
 
-  const completedCount = mapEventsPerStar.filter(
-    (star) => star.length > 0 && star.every((e) => e.isCompleted || e.isFullyDone)
-  ).length;
+  const completedCount = useMemo(
+    () => mapEventsPerStar.filter(
+      (star) => star.length > 0 && star.every((e) => e.isCompleted || e.isFullyDone)
+    ).length,
+    [mapEventsPerStar]
+  );
   const totalCount = mapEventsPerStar.length;
-  const mapChecklist = mapEventsPerStar.flat();
+  const mapChecklist = useMemo(() => mapEventsPerStar.flat(), [mapEventsPerStar]);
   const currentTheme = progress?.currentTheme || 'desert';
   const themeInfo = GAME_CONFIG.themeColors[currentTheme];
 
@@ -154,13 +247,21 @@ export default function DashboardPage() {
   const needsConsultationSelection = !currentMapInfo || consultations.length === 0 || (consultations.length > 0 && !currentConsultation);
 
   useEffect(() => {
-    if (!currentMapInfo?.consultationId || completedCount <= 0 || completedCount >= totalCount) return;
-    const key = `euexia_day_congrats_${currentMapInfo.consultationId}_${completedCount}`;
-    if (typeof window !== 'undefined' && !localStorage.getItem(key)) {
-      localStorage.setItem(key, '1');
-      setCompanionMessage(`Great work finishing Day ${completedCount}. Let’s walk to Day ${completedCount + 1} together.`);
+    if (!currentMapInfo?.consultationId) return;
+    const previousCompleted = previousCompletedRef.current;
+    if (previousCompleted === null) {
+      previousCompletedRef.current = completedCount;
+      return;
     }
-  }, [completedCount, currentMapInfo?.consultationId, totalCount]);
+
+    if (completedCount > previousCompleted && completedCount > 0 && completedCount < totalCount) {
+      if (selectedCheckpoint === null) {
+        setCompanionMessage(`Great work finishing Day ${completedCount}. Let’s walk to Day ${completedCount + 1} together.`);
+        setAdvanceKey(`${currentMapInfo.consultationId}:${previousCompleted}:${completedCount}`);
+      }
+    }
+    previousCompletedRef.current = completedCount;
+  }, [completedCount, currentMapInfo?.consultationId, selectedCheckpoint, totalCount]);
 
   const handleSelectConsultation = async (consultationId: string) => {
     await loadMap(consultationId, 0);
@@ -180,21 +281,76 @@ export default function DashboardPage() {
     }
   };
 
-  const handleCheckpointClick = (index: number) => {
+  const handleCheckpointClick = useCallback((index: number) => {
     setSelectedCheckpoint(index);
-  };
+  }, []);
 
   const handleCloseModal = () => {
     setSelectedCheckpoint(null);
   };
 
   const handleCompleteTask = async (itemId: string) => {
-    await completeItem(itemId);
-    // Modal will close automatically after completion
+    if (completingItemIdsRef.current.has(itemId)) return;
+    const checkpointIndex = selectedCheckpoint;
+    const eventsBefore = checkpointIndex !== null ? mapEventsPerStar[checkpointIndex] ?? [] : [];
+    const wasCheckpointDone = eventsBefore.length > 0 && eventsBefore.every((e) => e.isCompleted || e.isFullyDone);
+    completingItemIdsRef.current.add(itemId);
+    setCompletingItemIds((current) => new Set(current).add(itemId));
+
+    try {
+      const reward = await completeItem(itemId);
+      if (!reward) return;
+
+      if (
+        checkpointIndex !== null &&
+        !wasCheckpointDone &&
+        checkpointIndex === completedCount &&
+        completedCount < totalCount - 1
+      ) {
+        const latestChecklist = useGameStore.getState().checklist;
+        const latestCurrentChecklist = currentConsultationId
+          ? latestChecklist.filter((i) => i.consultationId === currentConsultationId)
+          : latestChecklist;
+        const latestDisplayChecklist = mergeDuplicateChecklistItems(latestCurrentChecklist);
+        const latestGroupOrder: string[] = [];
+        [...latestDisplayChecklist]
+          .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
+          .forEach((item) => {
+            const g = String(item.starGroupId ?? item.groupId ?? item._id ?? '');
+            if (!latestGroupOrder.includes(g)) latestGroupOrder.push(g);
+          });
+        const latestMapGroups = latestGroupOrder
+          .map((g) => latestDisplayChecklist.filter((e) => String(e.starGroupId ?? e.groupId ?? e._id ?? '') === g))
+          .slice(startStepIndex, endStepIndex + 1);
+        const latestEventsAtCheckpoint = latestMapGroups[checkpointIndex] ?? [];
+        const isCheckpointDone =
+          latestEventsAtCheckpoint.length > 0 &&
+          latestEventsAtCheckpoint.every((e) => e.isCompleted || e.isFullyDone);
+
+        if (isCheckpointDone) {
+          previousCompletedRef.current = checkpointIndex + 1;
+          setSelectedCheckpoint(null);
+          if (pendingAdvanceTimeoutRef.current) clearTimeout(pendingAdvanceTimeoutRef.current);
+          pendingAdvanceTimeoutRef.current = setTimeout(() => {
+            setCompanionMessage(`Great work finishing Day ${checkpointIndex + 1}. Let’s walk to Day ${checkpointIndex + 2} together.`);
+            setAdvanceKey(`${currentConsultationId}:${checkpointIndex}:${checkpointIndex + 1}:${Date.now()}`);
+          }, 650);
+        }
+      }
+    } finally {
+      setCompletingItemIds((current) => {
+        const next = new Set(current);
+        next.delete(itemId);
+        completingItemIdsRef.current.delete(itemId);
+        return next;
+      });
+    }
   };
 
   const handleCompanionMessageDone = useCallback(() => {
+    if (companionMessageTimeoutRef.current) clearTimeout(companionMessageTimeoutRef.current);
     setCompanionMessage(undefined);
+    setAdvanceKey(undefined);
   }, []);
 
   // Selected star's events (for overlay: list of events at this star)
@@ -232,6 +388,7 @@ export default function DashboardPage() {
             playerCharacterId={progress?.selectedCharacter}
             introMessage={introMessage}
             companionMessage={companionMessage}
+            advanceKey={advanceKey}
             onCompanionMessageDone={handleCompanionMessageDone}
           />
 
@@ -241,39 +398,39 @@ export default function DashboardPage() {
             animate={{ opacity: 1, y: 0 }}
             className="absolute bottom-3 left-2 right-2 z-20 pointer-events-none sm:left-3 sm:right-3"
           >
-            <div className="pointer-events-auto mx-auto max-w-lg overflow-hidden rounded-[1.4rem] border border-white/10 bg-slate-950/82 px-3 py-2 shadow-2xl shadow-slate-950/45 backdrop-blur-xl">
+            <div className="pointer-events-auto mx-auto max-w-lg overflow-hidden rounded-[1.4rem] border border-blue-200/70 bg-white/90 px-3 py-2 shadow-2xl shadow-blue-900/10 backdrop-blur-xl">
               <button
                 type="button"
                 onClick={() => setRouteHudExpanded((value) => !value)}
                 className="flex w-full items-center gap-2.5 text-left"
                 aria-expanded={routeHudExpanded}
               >
-                <span className="grid h-11 w-11 shrink-0 place-items-center rounded-[1.1rem] bg-gradient-to-br from-emerald-300 to-cyan-400 text-xs font-black text-slate-950 shadow-lg shadow-cyan-500/20">
+                <span className="grid h-11 w-11 shrink-0 place-items-center rounded-[1.1rem] bg-gradient-to-br from-teal-300 to-cyan-400 text-xs font-black text-[#0b1f58] shadow-lg shadow-cyan-500/20">
                   {completedCount}/{totalCount}
                 </span>
 
                 <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2 text-[10px] font-black uppercase text-cyan-100">
+                  <div className="flex items-center gap-2 text-[10px] font-black uppercase text-teal-700">
                     <span className="truncate">{themeInfo?.emoji || '🗺️'} Quest Map</span>
                     {currentMapInfo && currentMaps.length > 1 && (
-                      <span className="shrink-0 rounded-full border border-white/10 bg-white/10 px-2 py-0.5 text-slate-200">
+                      <span className="shrink-0 rounded-full border border-blue-100 bg-blue-50 px-2 py-0.5 text-blue-700">
                         {currentMapIndex + 1}/{currentMaps.length}
                       </span>
                     )}
                   </div>
-                  <div className="block truncate text-sm font-black leading-tight text-white sm:text-base">
+                  <div className="block truncate text-sm font-black leading-tight text-[#0b1f58] sm:text-base">
                     {currentConsultation?.title || currentMapInfo?.consultationTitle || 'My Consultation'}
                   </div>
                   <div className="mt-1 flex items-center gap-2">
-                    <div className="h-2 flex-1 overflow-hidden rounded-full border border-white/10 bg-slate-950/70">
+                    <div className="h-2 flex-1 overflow-hidden rounded-full border border-blue-100 bg-blue-50">
                       <motion.div
-                        className="h-full rounded-full bg-gradient-to-r from-emerald-400 via-cyan-300 to-violet-300"
+                        className="h-full rounded-full bg-gradient-to-r from-teal-500 via-cyan-300 to-blue-600"
                         initial={{ width: 0 }}
                         animate={{ width: `${totalCount > 0 ? Math.min(100, (completedCount / totalCount) * 100) : 0}%` }}
                         transition={{ duration: 0.7, ease: 'easeOut' }}
                       />
                     </div>
-                    <span className="shrink-0 text-[10px] font-bold text-slate-300">
+                    <span className="shrink-0 text-[10px] font-bold text-slate-600">
                       {totalCount - completedCount > 0
                         ? `${totalCount - completedCount} left`
                         : 'Complete'}
@@ -281,7 +438,7 @@ export default function DashboardPage() {
                   </div>
                 </div>
 
-                <span className="grid h-9 w-9 shrink-0 place-items-center rounded-[1rem] border border-white/10 bg-white/10 text-white">
+                <span className="grid h-9 w-9 shrink-0 place-items-center rounded-[1rem] border border-blue-100 bg-blue-50 text-blue-700">
                   {routeHudExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronUp className="h-4 w-4" />}
                 </span>
               </button>
@@ -290,10 +447,10 @@ export default function DashboardPage() {
                 <motion.div
                   initial={{ opacity: 0, height: 0 }}
                   animate={{ opacity: 1, height: 'auto' }}
-                  className="mt-3 overflow-hidden border-t border-white/10 pt-3"
+                  className="mt-3 overflow-hidden border-t border-blue-100 pt-3"
                 >
                   <div className="flex items-center justify-between gap-2">
-                    <p className="text-xs font-semibold text-slate-300">
+                    <p className="text-xs font-semibold text-slate-600">
                       {totalCount - completedCount > 0
                         ? `${totalCount - completedCount} quests left on this route`
                         : 'Route complete. Claim your momentum!'}
@@ -301,7 +458,7 @@ export default function DashboardPage() {
                     {consultations.length > 1 && (
                       <button
                         onClick={() => setShowConsultationSelector(true)}
-                        className="grid h-10 w-10 shrink-0 place-items-center rounded-[1rem] border border-white/10 bg-white/10 text-white shadow-lg transition hover:bg-cyan-400/20"
+                        className="grid h-10 w-10 shrink-0 place-items-center rounded-[1rem] border border-blue-100 bg-blue-50 text-blue-700 shadow-lg transition hover:bg-cyan-100"
                         title="Switch consultation"
                       >
                         <RefreshCw className="h-4 w-4" />
@@ -313,7 +470,7 @@ export default function DashboardPage() {
                       <button
                         onClick={handlePrevMap}
                         disabled={!hasPrevMap}
-                        className="inline-flex flex-1 items-center justify-center gap-1 rounded-2xl border border-white/10 bg-white/10 px-3 py-2 text-[11px] font-bold text-white transition hover:bg-white/15 disabled:cursor-not-allowed disabled:opacity-40"
+                        className="inline-flex flex-1 items-center justify-center gap-1 rounded-2xl border border-blue-100 bg-blue-50 px-3 py-2 text-[11px] font-bold text-blue-700 transition hover:bg-cyan-100 disabled:cursor-not-allowed disabled:opacity-40"
                       >
                         <ChevronLeft className="h-3.5 w-3.5" />
                         Back
@@ -321,7 +478,7 @@ export default function DashboardPage() {
                       <button
                         onClick={handleNextMap}
                         disabled={!hasNextMap}
-                        className="inline-flex flex-1 items-center justify-center gap-1 rounded-2xl border border-white/10 bg-white/10 px-3 py-2 text-[11px] font-bold text-white transition hover:bg-white/15 disabled:cursor-not-allowed disabled:opacity-40"
+                        className="inline-flex flex-1 items-center justify-center gap-1 rounded-2xl border border-blue-100 bg-blue-50 px-3 py-2 text-[11px] font-bold text-blue-700 transition hover:bg-cyan-100 disabled:cursor-not-allowed disabled:opacity-40"
                       >
                         Next
                         <ChevronRight className="h-3.5 w-3.5" />
@@ -337,7 +494,7 @@ export default function DashboardPage() {
             <div className="absolute left-3 top-3 z-20">
               <button
                 onClick={() => setShowConsultationSelector(true)}
-                className="grid h-10 w-10 shrink-0 place-items-center rounded-[1rem] border border-white/10 bg-slate-950/70 text-white shadow-lg shadow-slate-950/35 backdrop-blur-xl transition hover:bg-cyan-400/20"
+                className="grid h-10 w-10 shrink-0 place-items-center rounded-[1rem] border border-blue-200/70 bg-white/90 text-blue-700 shadow-lg shadow-blue-900/10 backdrop-blur-xl transition hover:bg-cyan-50"
                 title="Switch consultation"
               >
                 <RefreshCw className="h-4 w-4" />
@@ -464,6 +621,7 @@ export default function DashboardPage() {
         items={selectedStarEvents}
         checkpointNumber={(selectedCheckpoint ?? 0) + 1}
         onComplete={handleCompleteTask}
+        completingItemIds={completingItemIds}
       />
 
       <DoctorChatModal

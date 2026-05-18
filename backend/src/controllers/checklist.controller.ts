@@ -3,6 +3,35 @@ import { AuthRequest } from '../middleware/auth';
 import { ChecklistItem } from '../models/ChecklistItem';
 import { awardCompletion } from '../services/gamification';
 
+const isMedicationToday = (item: { category?: string; unlockAt?: Date | string | null }, now: Date): boolean => {
+  if (item.category !== 'medication' || !item.unlockAt) return false;
+  const unlockAt = new Date(item.unlockAt);
+  return (
+    unlockAt.getFullYear() === now.getFullYear() &&
+    unlockAt.getMonth() === now.getMonth() &&
+    unlockAt.getDate() === now.getDate()
+  );
+};
+
+const medicationDayFromDescription = (description?: string): string | null => {
+  const match = String(description ?? '').match(/\bDay\s+(\d+)\s+of\b/i);
+  return match ? match[1] : null;
+};
+
+const normalizedMedicationTitle = (title?: string): string =>
+  String(title ?? '').toLowerCase().replace(/\(\d+\/\d+\)$/g, '').replace(/\s+/g, ' ').trim();
+
+const medicationCompletionKey = (item: any): string | null => {
+  if (item.category !== 'medication') return null;
+  const title = normalizedMedicationTitle(item.title);
+  const day = medicationDayFromDescription(item.description)
+    ?? (item.unlockAt ? new Date(item.unlockAt).toISOString().slice(0, 10) : 'today');
+  const slot = item.unlockAt
+    ? String(new Date(item.unlockAt).getHours()).padStart(2, '0')
+    : String(item.orderInGroup ?? 0);
+  return `${title}_${day}_${slot}`;
+};
+
 /**
  * Get all checklist items for the authenticated user.
  * Includes computed `isLocked` and `remainingSeconds` for frontend timers.
@@ -68,7 +97,6 @@ export const completeItem = async (req: AuthRequest, res: Response): Promise<voi
     }
 
     const now = new Date();
-
     // Check if item is fully done (all required completions met)
     if (item.isFullyDone) {
       res.status(400).json({ error: 'This task is fully completed — no more completions needed.' });
@@ -76,7 +104,9 @@ export const completeItem = async (req: AuthRequest, res: Response): Promise<voi
     }
 
     // Check if item is locked (hasn't unlocked yet)
-    if (item.unlockAt && now < item.unlockAt) {
+    const ignoreSameDayMedicationTime = isMedicationToday(item, now);
+
+    if (!ignoreSameDayMedicationTime && item.unlockAt && now < item.unlockAt) {
       const remainingSec = Math.ceil((item.unlockAt.getTime() - now.getTime()) / 1000);
       res.status(400).json({
         error: 'locked',
@@ -153,13 +183,51 @@ export const completeItem = async (req: AuthRequest, res: Response): Promise<voi
 
     await item.save();
 
+    const completedKey = medicationCompletionKey(item);
+    const relatedUpdatedItems: any[] = [];
+    if (completedKey) {
+      const possibleDuplicates = await ChecklistItem.find({
+        userId: req.userId,
+        consultationId: item.consultationId,
+        category: 'medication',
+        _id: { $ne: item._id },
+        isFullyDone: false,
+      });
+
+      const matchingDuplicates = possibleDuplicates
+        .filter((candidate) => medicationCompletionKey(candidate) === completedKey);
+      await Promise.all(
+        matchingDuplicates.map(async (duplicate) => {
+          duplicate.isCompleted = true;
+          duplicate.isFullyDone = true;
+          duplicate.completedAt = now;
+          duplicate.completionCount = Math.max(duplicate.completionCount, duplicate.totalRequired || 1);
+          duplicate.nextDueAt = null;
+          await duplicate.save();
+          relatedUpdatedItems.push(addTimingInfo(duplicate.toObject()));
+        })
+      );
+    }
+
+    const latestConsultationItems = await ChecklistItem.find({
+      userId: req.userId,
+      consultationId: item.consultationId,
+    })
+      .sort({ order: 1 })
+      .lean();
+    const refreshedItems = latestConsultationItems.map((latestItem) =>
+      addTimingInfo(latestItem, latestConsultationItems)
+    );
+    const responseItem =
+      refreshedItems.find((latestItem) => String(latestItem._id) === String(item._id)) ??
+      addTimingInfo(item.toObject(), latestConsultationItems);
+
     // Award XP and coins
     const reward = await awardCompletion(req.userId!, item.xpReward, item.coinReward);
 
-    const responseItem = addTimingInfo(item.toObject());
-
     res.json({
       item: responseItem,
+      updatedItems: refreshedItems.length > 0 ? refreshedItems : [responseItem, ...relatedUpdatedItems],
       reward: {
         xpGained: reward.xpGained,
         coinsGained: reward.coinsGained,
@@ -218,9 +286,13 @@ export const uncompleteItem = async (req: AuthRequest, res: Response): Promise<v
  */
 function addTimingInfo(item: any, allItemsInConsultation?: any[]): any {
   const now = new Date();
-
   // Is the item locked by time (hasn't unlocked yet)?
-  let isLockedByTime = item.unlockAt ? now < new Date(item.unlockAt) : false;
+  const ignoreSameDayMedicationTime = isMedicationToday(item, now);
+
+  let isLockedByTime =
+    !ignoreSameDayMedicationTime && item.unlockAt
+      ? now < new Date(item.unlockAt)
+      : false;
 
   // Event grouping: locked if previous event in same group (same consultation) is not completed
   let isLockedByGroup = false;

@@ -25,12 +25,12 @@ export default function TopBar() {
       className="fixed left-0 right-0 top-0 z-40 px-3 pb-1.5 pt-2"
     >
       <div className="quest-shell">
-        <div className="relative overflow-hidden rounded-[1.4rem] border border-white/10 bg-slate-950/72 px-2.5 py-1.5 shadow-2xl shadow-slate-950/40 backdrop-blur-xl">
-          <div className="absolute inset-x-8 top-0 h-px bg-gradient-to-r from-transparent via-cyan-200/60 to-transparent" />
+        <div className="relative overflow-hidden rounded-[1.4rem] border border-blue-200/70 bg-white/90 px-2.5 py-1.5 shadow-2xl shadow-blue-900/10 backdrop-blur-xl">
+          <div className="absolute inset-x-8 top-0 h-px bg-gradient-to-r from-transparent via-cyan-300/70 to-transparent" />
           <div className="flex items-center gap-2.5">
         {/* Level Badge */}
         <div className="relative flex-shrink-0">
-          <div className="absolute inset-0 rounded-full bg-orange-300/30 blur-md" />
+          <div className="absolute inset-0 rounded-full bg-cyan-300/30 blur-md" />
           <div className="level-badge relative h-10 w-10 text-sm">
             {progress?.level || 1}
           </div>
@@ -39,19 +39,19 @@ export default function TopBar() {
         {/* XP Bar */}
         <div className="flex-1 min-w-0">
           <div className="mb-1 flex items-center justify-between gap-2 text-[10px]">
-            <span className="truncate font-bold uppercase tracking-wide text-cyan-100">
+            <span className="truncate font-bold uppercase tracking-wide text-[#0b1f58]">
               {user?.name || 'Player'}
             </span>
-            <span className="rounded-full bg-violet-400/15 px-2 py-0.5 font-bold text-violet-100">
+            <span className="rounded-full bg-blue-50 px-2 py-0.5 font-bold text-blue-700">
               {progress?.xp || 0} XP
             </span>
           </div>
-          <div className="relative h-2.5 overflow-hidden rounded-full border border-white/10 bg-slate-950/80">
+          <div className="relative h-2.5 overflow-hidden rounded-full border border-blue-100 bg-blue-50">
             <motion.div
               className="h-full rounded-full"
               style={{
-                background: 'linear-gradient(90deg, #22c55e, #38bdf8, #a78bfa)',
-                boxShadow: '0 0 18px rgba(56,189,248,0.5)',
+                background: 'linear-gradient(90deg, #00a7a5, #4dd7e8, #1466c8)',
+                boxShadow: '0 0 18px rgba(77,215,232,0.45)',
               }}
               initial={{ width: 0 }}
               animate={{ width: `${Math.min(levelPct, 100)}%` }}
@@ -69,9 +69,9 @@ export default function TopBar() {
 
         {/* Streak */}
         {(progress?.streak || 0) > 0 && (
-          <div className="flex items-center gap-0.5 px-2 py-1 rounded-full bg-orange-500/20 border border-orange-500/30 flex-shrink-0">
+          <div className="flex items-center gap-0.5 px-2 py-1 rounded-full bg-orange-50 border border-orange-200 flex-shrink-0">
             <span className="text-base">🔥</span>
-            <span className="text-orange-300 text-xs font-bold">{progress?.streak}</span>
+            <span className="text-orange-600 text-xs font-bold">{progress?.streak}</span>
           </div>
         )}
 
@@ -79,7 +79,7 @@ export default function TopBar() {
         <button
           type="button"
           onClick={handleProfileClick}
-          className="ml-1 w-8 h-8 rounded-[1rem] overflow-hidden border border-slate-400/60 bg-slate-900 flex-shrink-0 flex items-center justify-center hover:scale-[1.03] hover:border-blue-400 transition"
+          className="ml-1 w-8 h-8 rounded-[1rem] overflow-hidden border border-blue-100 bg-white flex-shrink-0 flex items-center justify-center shadow-sm hover:scale-[1.03] hover:border-cyan-400 transition"
         >
           <Image
             src={getCharacterSpriteSrc(characterId)}
@@ -95,5 +95,4 @@ export default function TopBar() {
     </motion.div>
   );
 }
-
 
