@@ -32,6 +32,103 @@ body {
   -webkit-tap-highlight-color: transparent;
 }
 
+.mobile-viewer {
+  min-height: 100vh;
+}
+
+.mobile-viewer__screen {
+  min-height: 100vh;
+}
+
+@media (min-width: 768px) and (hover: hover) and (pointer: fine) {
+  html,
+  body {
+    min-height: 100%;
+    overflow: hidden;
+  }
+
+  body {
+    display: grid;
+    place-items: center;
+    padding: 24px;
+  }
+
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    background:
+      radial-gradient(circle at 28% 18%, rgba(52, 211, 153, 0.22), transparent 22rem),
+      radial-gradient(circle at 76% 28%, rgba(56, 189, 248, 0.18), transparent 24rem);
+  }
+
+  .mobile-viewer {
+    position: relative;
+    width: min(100%, 430px);
+    height: min(920px, calc(100vh - 48px));
+    min-height: 0;
+    padding: 14px;
+    border-radius: 42px;
+    background:
+      linear-gradient(145deg, rgba(226, 232, 240, 0.22), rgba(15, 23, 42, 0.74)),
+      linear-gradient(180deg, #0f172a, #020617);
+    border: 1px solid rgba(226, 232, 240, 0.28);
+    box-shadow:
+      0 34px 90px rgba(0, 0, 0, 0.56),
+      inset 0 1px 0 rgba(255, 255, 255, 0.22),
+      inset 0 -1px 0 rgba(0, 0, 0, 0.42);
+  }
+
+  .mobile-viewer::before {
+    content: '';
+    position: absolute;
+    top: 8px;
+    left: 50%;
+    z-index: 3;
+    width: 118px;
+    height: 22px;
+    transform: translateX(-50%);
+    border-radius: 0 0 16px 16px;
+    background: #020617;
+    box-shadow: inset 0 -1px 0 rgba(255, 255, 255, 0.08);
+  }
+
+  .mobile-viewer__screen {
+    position: relative;
+    isolation: isolate;
+    width: 100%;
+    height: 100%;
+    min-height: 0;
+    overflow: auto;
+    border-radius: 30px;
+    background: #08111f;
+    box-shadow: inset 0 0 0 1px rgba(148, 163, 184, 0.16);
+    transform: translateZ(0);
+    overscroll-behavior: contain;
+    scrollbar-width: none;
+  }
+
+  .mobile-viewer__screen::-webkit-scrollbar {
+    display: none;
+  }
+
+  .mobile-viewer__screen .app-screen {
+    min-height: 100%;
+  }
+
+  .mobile-viewer__screen .h-screen {
+    height: 100%;
+  }
+
+  .mobile-viewer > .bottom-nav {
+    position: absolute;
+    left: 14px;
+    right: 14px;
+    bottom: 14px;
+  }
+}
+
 /* Custom scrollbar */
 ::-webkit-scrollbar {
   width: 6px;
@@ -217,4 +314,3 @@ body {
   background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.18), transparent);
   animation: shimmer 2.8s ease-in-out infinite;
 }
-

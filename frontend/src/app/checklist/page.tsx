@@ -3,7 +3,6 @@ import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { motion } from 'framer-motion';
 import TopBar from '@/components/ui/TopBar';
-import BottomNav from '@/components/ui/BottomNav';
 import RewardPopup from '@/components/ui/RewardPopup';
 import ChecklistView from '@/components/checklist/ChecklistView';
 import { useGameStore } from '@/stores/gameStore';
@@ -48,8 +47,6 @@ export default function ChecklistPage() {
         <ChecklistView />
       </div>
 
-      <BottomNav />
     </div>
   );
 }
-

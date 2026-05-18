@@ -15,11 +15,13 @@ export default function BottomNav() {
   const pathname = usePathname();
   const router = useRouter();
 
+  if (pathname === '/') return null;
+
   return (
     <motion.nav
       initial={{ y: 80 }}
       animate={{ y: 0 }}
-      className="fixed bottom-0 left-0 right-0 z-50 px-3 pb-2"
+      className="bottom-nav fixed bottom-0 left-0 right-0 z-50 px-3 pb-2"
     >
       <div className="quest-shell">
         <div className="relative flex items-center justify-around rounded-[1.65rem] border border-white/10 bg-slate-950/80 px-2 py-1.5 shadow-2xl shadow-slate-950/50 backdrop-blur-xl">
@@ -73,4 +75,3 @@ export default function BottomNav() {
     </motion.nav>
   );
 }
-

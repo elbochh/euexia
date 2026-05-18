@@ -3,7 +3,6 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 import TopBar from '@/components/ui/TopBar';
-import BottomNav from '@/components/ui/BottomNav';
 import VoiceRecorder from '@/components/upload/VoiceRecorder';
 import ImageUploader from '@/components/upload/ImageUploader';
 import TextInput from '@/components/upload/TextInput';
@@ -22,7 +21,7 @@ interface PendingUpload {
 
 export default function UploadPage() {
   const router = useRouter();
-  const { isAuthenticated, initFromStorage, loadChecklist, loadProgress, loadConsultationsWithMaps } = useGameStore();
+  const { isAuthenticated, initFromStorage, loadChecklist, loadProgress, loadConsultationsWithMaps, loadCurrentMap } = useGameStore();
   const [step, setStep] = useState<'select' | 'input' | 'processing' | 'done'>('select');
   const [selectedTypes, setSelectedTypes] = useState<Set<UploadType>>(new Set());
   const [currentType, setCurrentType] = useState<UploadType | null>(null);
@@ -71,57 +70,6 @@ export default function UploadPage() {
     const currentIndex = types.indexOf(upload.type);
     if (currentIndex < types.length - 1) {
       setCurrentType(types[currentIndex + 1]);
-    }
-  };
-
-  const SIMPLE_TEST_TEXT = `Patient consultation notes — Dr. Ahmed Al-Rashid, 14 Feb 2026
-
-Patient: John Doe, 34 y/o male
-Diagnosis: Mild bacterial throat infection
-
-Treatment plan:
-- Take 1 amoxicillin 500mg pill once daily for 3 consecutive days (Day 1, Day 2, Day 3).
-- No other medication required.
-- Drink plenty of water and rest.
-
-Follow-up: Return if symptoms persist beyond day 3.`;
-
-  const handleSimpleTest = async () => {
-    // Reset any stale state from a previous run
-    setTitle('Simple Test — 3-Day Pill');
-    setSelectedTypes(new Set(['text'] as UploadType[]));
-    setUploads([{ type: 'text', data: SIMPLE_TEST_TEXT, rawText: SIMPLE_TEST_TEXT }]);
-    // Kick off processing directly (state updates are async so pass values directly)
-    setStep('processing');
-    setProcessing(true);
-
-    try {
-      setProcessingStep('Creating your health checklist...');
-      const token = typeof window !== 'undefined' ? localStorage.getItem('euexia_token') : null;
-      if (!token) throw new Error('Authentication required. Please log in again.');
-
-      await uploadApi.createConsultation({
-        title: 'Simple Test — 3-Day Pill',
-        uploads: [{ type: 'text', rawText: SIMPLE_TEST_TEXT }],
-      });
-
-      setProcessingStep('Done! Your quests are ready!');
-      await new Promise((r) => setTimeout(r, 500));
-      await loadChecklist();
-      await loadProgress();
-      await loadConsultationsWithMaps();
-      setStep('done');
-      setTimeout(() => router.push('/consultations'), 1500);
-    } catch (error: any) {
-      const msg = error?.response?.data?.error || error?.message || 'Processing failed.';
-      if (error?.response?.status === 401) {
-        setProcessingStep('Authentication failed. Please log in again.');
-        setTimeout(() => router.push('/'), 2000);
-      } else {
-        setProcessingStep(`Error: ${msg}`);
-      }
-    } finally {
-      setProcessing(false);
     }
   };
 
@@ -176,7 +124,7 @@ Follow-up: Return if symptoms persist beyond day 3.`;
         throw new Error('Authentication required. Please log in again.');
       }
       
-      const result = await uploadApi.createConsultation({
+      await uploadApi.createConsultation({
         title,
         uploads: processedUploads,
       });
@@ -188,13 +136,12 @@ Follow-up: Return if symptoms persist beyond day 3.`;
       await loadChecklist();
       await loadProgress();
       await loadConsultationsWithMaps();
+      await loadCurrentMap();
 
       setStep('done');
-      
-      // Redirect to consultations page after a short delay
       setTimeout(() => {
-        router.push('/consultations');
-      }, 1500);
+        router.push('/dashboard');
+      }, 500);
     } catch (error: any) {
       console.error('Processing failed:', error);
       const errorMessage = error?.response?.data?.error || error?.message || 'Processing failed. Please try again.';
@@ -213,7 +160,7 @@ Follow-up: Return if symptoms persist beyond day 3.`;
   };
 
   return (
-    <div className="app-screen min-h-screen pb-24 pt-20">
+    <div className="app-screen min-h-screen pb-44 pt-20">
       <TopBar />
 
       <div className="quest-shell px-3 mt-2">
@@ -278,24 +225,6 @@ Follow-up: Return if symptoms persist beyond day 3.`;
               >
                 Continue ({selectedTypes.size} selected)
               </button>
-
-              <div className="relative flex items-center my-4">
-                <div className="flex-1 border-t border-white/10" />
-                <span className="mx-3 text-xs text-gray-500">or</span>
-                <div className="flex-1 border-t border-white/10" />
-              </div>
-
-              <motion.button
-                whileTap={{ scale: 0.97 }}
-                onClick={handleSimpleTest}
-                className="w-full py-3 px-4 rounded-xl border border-yellow-500/40 bg-yellow-500/10
-                  text-yellow-300 font-bold text-sm flex items-center justify-center gap-2
-                  hover:bg-yellow-500/20 transition-colors"
-              >
-                <span className="text-lg">⚡</span>
-                Simple Test
-                <span className="ml-1 text-yellow-500/60 font-normal text-xs">(3-day pill · instant)</span>
-              </motion.button>
             </motion.div>
           )}
 
@@ -484,9 +413,6 @@ Follow-up: Return if symptoms persist beyond day 3.`;
           )}
         </AnimatePresence>
       </div>
-
-      <BottomNav />
     </div>
   );
 }
-

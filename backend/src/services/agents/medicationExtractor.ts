@@ -93,12 +93,16 @@ export function extractMedicationNames(rawText: string): ExtractedMedication[] {
   const found = new Map<string, ExtractedMedication>(); // keyed by lowercase name
 
   // Strategy 1: Match known drug names
-  for (const drug of KNOWN_DRUG_NAMES) {
+  for (const drug of [...KNOWN_DRUG_NAMES].sort((a, b) => b.length - a.length)) {
     const idx = textLower.indexOf(drug);
     if (idx === -1) continue;
 
-    // Already found (e.g. "gtn" after "glyceryl trinitrate")
-    if (found.has(drug)) continue;
+    const drugKey = drug.replace(/[^a-z0-9]/gi, '').toLowerCase();
+    const existingAlias = Array.from(found.keys()).find((key) => {
+      const normalized = key.replace(/[^a-z0-9]/gi, '').toLowerCase();
+      return normalized.includes(drugKey) || drugKey.includes(normalized);
+    });
+    if (existingAlias) continue;
 
     // Grab surrounding context (up to 120 chars after the name)
     const start = idx;

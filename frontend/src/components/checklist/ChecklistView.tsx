@@ -61,6 +61,13 @@ function formatTime(date: Date): string {
   return `${displayHours}:${displayMinutes} ${ampm}`;
 }
 
+function localDayKey(date: Date): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
 /** Group tasks by day based on unlockAt or nextDueAt */
 function groupTasksByDay(tasks: ChecklistItemType[]): Map<string, ChecklistItemType[]> {
   const groups = new Map<string, ChecklistItemType[]>();
@@ -71,7 +78,7 @@ function groupTasksByDay(tasks: ChecklistItemType[]): Map<string, ChecklistItemT
     if (!dateStr) return;
     
     const date = new Date(dateStr);
-    const dayKey = date.toISOString().split('T')[0]; // YYYY-MM-DD
+    const dayKey = localDayKey(date);
     
     if (!groups.has(dayKey)) {
       groups.set(dayKey, []);

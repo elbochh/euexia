@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from 'next';
+import BottomNav from '@/components/ui/BottomNav';
 import './globals.css';
 
 export const metadata: Metadata = {
@@ -22,9 +23,13 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className="min-h-screen bg-game-bg font-game antialiased">
-        {children}
+        <main className="mobile-viewer" aria-label="Euexia mobile app preview">
+          <div className="mobile-viewer__screen">
+            {children}
+          </div>
+          <BottomNav />
+        </main>
       </body>
     </html>
   );
 }
-

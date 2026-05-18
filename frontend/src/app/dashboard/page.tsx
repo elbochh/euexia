@@ -1,5 +1,5 @@
 'use client';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { motion } from 'framer-motion';
 import dynamic from 'next/dynamic';
@@ -8,12 +8,9 @@ import {
   ChevronLeft,
   ChevronRight,
   ChevronUp,
-  MessageCircle,
   RefreshCw,
-  Stethoscope,
 } from 'lucide-react';
 import TopBar from '@/components/ui/TopBar';
-import BottomNav from '@/components/ui/BottomNav';
 import RewardPopup from '@/components/ui/RewardPopup';
 import CheckpointBottomOverlay from '@/components/game/CheckpointBottomOverlay';
 import DoctorChatModal from '@/components/chat/DoctorChatModal';
@@ -48,6 +45,7 @@ export default function DashboardPage() {
   const [showProfile, setShowProfile] = useState(false);
   const [routeHudExpanded, setRouteHudExpanded] = useState(false);
   const [introMessage, setIntroMessage] = useState<string | undefined>(undefined);
+  const [companionMessage, setCompanionMessage] = useState<string | undefined>(undefined);
 
   useEffect(() => {
     initFromStorage();
@@ -74,7 +72,7 @@ export default function DashboardPage() {
     if (!localStorage.getItem(key)) {
       localStorage.setItem(key, '1');
       setIntroMessage(
-        "There’s a long way to go, but I’ll walk with you one step at a time. Feel free to ask me anything along the path."
+        "I’ll walk with you from the start. Let’s reach today’s first checkpoint together."
       );
     } else {
       setIntroMessage(undefined);
@@ -133,7 +131,9 @@ export default function DashboardPage() {
   const endStepIndex = currentMapInfo?.endStepIndex ?? Math.max(0, eventsPerStarAll.length - 1);
   const mapEventsPerStar = eventsPerStarAll.slice(startStepIndex, endStepIndex + 1);
 
-  const completedCount = mapEventsPerStar.filter((star) => star.some((e) => e.isCompleted)).length;
+  const completedCount = mapEventsPerStar.filter(
+    (star) => star.length > 0 && star.every((e) => e.isCompleted || e.isFullyDone)
+  ).length;
   const totalCount = mapEventsPerStar.length;
   const mapChecklist = mapEventsPerStar.flat();
   const currentTheme = progress?.currentTheme || 'desert';
@@ -152,6 +152,15 @@ export default function DashboardPage() {
 
   // If no current consultation or no maps, show consultation selector
   const needsConsultationSelection = !currentMapInfo || consultations.length === 0 || (consultations.length > 0 && !currentConsultation);
+
+  useEffect(() => {
+    if (!currentMapInfo?.consultationId || completedCount <= 0 || completedCount >= totalCount) return;
+    const key = `euexia_day_congrats_${currentMapInfo.consultationId}_${completedCount}`;
+    if (typeof window !== 'undefined' && !localStorage.getItem(key)) {
+      localStorage.setItem(key, '1');
+      setCompanionMessage(`Great work finishing Day ${completedCount}. Let’s walk to Day ${completedCount + 1} together.`);
+    }
+  }, [completedCount, currentMapInfo?.consultationId, totalCount]);
 
   const handleSelectConsultation = async (consultationId: string) => {
     await loadMap(consultationId, 0);
@@ -183,6 +192,10 @@ export default function DashboardPage() {
     await completeItem(itemId);
     // Modal will close automatically after completion
   };
+
+  const handleCompanionMessageDone = useCallback(() => {
+    setCompanionMessage(undefined);
+  }, []);
 
   // Selected star's events (for overlay: list of events at this star)
   const selectedStarEventsRaw = selectedCheckpoint !== null
@@ -218,6 +231,8 @@ export default function DashboardPage() {
             userName={user?.name}
             playerCharacterId={progress?.selectedCharacter}
             introMessage={introMessage}
+            companionMessage={companionMessage}
+            onCompanionMessageDone={handleCompanionMessageDone}
           />
 
           {/* In-map route drawer */}
@@ -329,26 +344,6 @@ export default function DashboardPage() {
               </button>
             </div>
           )}
-
-          <motion.button
-            initial={{ opacity: 0, y: 14 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.2 }}
-            onClick={() => setShowDoctorChat(true)}
-            className="absolute right-3 z-20 inline-flex max-w-[calc(100%-1.5rem)] items-center gap-2 rounded-[1.35rem] border border-cyan-200/30 bg-slate-950/82 px-3 py-2 text-left text-white shadow-2xl shadow-slate-950/40 backdrop-blur-xl transition hover:-translate-y-0.5 hover:border-cyan-200/60 hover:bg-slate-900/90 sm:right-4"
-            style={{ bottom: routeHudExpanded ? '9.5rem' : '5.5rem' }}
-          >
-            <span className="grid h-10 w-10 shrink-0 place-items-center rounded-[1rem] bg-gradient-to-br from-cyan-300 to-blue-500 text-slate-950 shadow-lg shadow-cyan-500/20">
-              <Stethoscope className="h-5 w-5" />
-            </span>
-            <span className="min-w-0">
-              <span className="block text-sm font-black leading-tight">Ask Dr. Gemma</span>
-              <span className="block truncate text-[11px] font-semibold text-cyan-100/80">
-                Answers from this visit
-              </span>
-            </span>
-            <MessageCircle className="h-4 w-4 shrink-0 text-cyan-100" />
-          </motion.button>
 
           {/* Consultation Selector Overlay */}
           {showConsultationSelector && (
@@ -462,9 +457,6 @@ export default function DashboardPage() {
           )}
         </motion.div>
       </div>
-
-      <BottomNav />
-
       {/* Checkpoint Bottom Overlay: list of events at selected star */}
       <CheckpointBottomOverlay
         isOpen={selectedCheckpoint !== null && selectedStarEvents.length > 0}
@@ -484,4 +476,3 @@ export default function DashboardPage() {
     </div>
   );
 }
-
