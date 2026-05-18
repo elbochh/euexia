@@ -1,0 +1,226 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900" viewBox="0 0 1600 900">
+  <defs>
+    <marker id="arrow-purple" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L0,6 L8,3 z" fill="#8b5cf6"/>
+    </marker>
+    <marker id="arrow-blue" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L0,6 L8,3 z" fill="#3b82f6"/>
+    </marker>
+    <marker id="arrow-cyan" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L0,6 L8,3 z" fill="#06b6d4"/>
+    </marker>
+    <marker id="arrow-green" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L0,6 L8,3 z" fill="#10b981"/>
+    </marker>
+    <marker id="arrow-orange" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L0,6 L8,3 z" fill="#f59e0b"/>
+    </marker>
+    <marker id="arrow-pink" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L0,6 L8,3 z" fill="#f43f5e"/>
+    </marker>
+    <linearGradient id="soft-bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="58%" stop-color="#f8fdff"/>
+      <stop offset="100%" stop-color="#eefbff"/>
+    </linearGradient>
+    <linearGradient id="euexia-blue" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#1466c8"/>
+      <stop offset="55%" stop-color="#06b6d4"/>
+      <stop offset="100%" stop-color="#00a7a5"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="10" stdDeviation="10" flood-color="#0b1f58" flood-opacity="0.10"/>
+    </filter>
+    <style>
+      .title { font: 700 44px Arial, Helvetica, sans-serif; fill: #000; }
+      .main-title { font: 700 34px Arial, Helvetica, sans-serif; fill: #1f2937; letter-spacing: 1px; }
+      .subtitle { font: 500 19px Arial, Helvetica, sans-serif; fill: #75849a; }
+      .step { font: 700 15px Arial, Helvetica, sans-serif; fill: #718096; }
+      .box-title { font: 700 23px Arial, Helvetica, sans-serif; }
+      .small-title { font: 700 16px Arial, Helvetica, sans-serif; }
+      .body { font: 500 15px Arial, Helvetica, sans-serif; fill: #75849a; }
+      .tiny { font: 500 12px Arial, Helvetica, sans-serif; fill: #8390a3; }
+      .legend { font: 500 12px Arial, Helvetica, sans-serif; fill: #7c8798; }
+      .patient-label { font: 700 18px Arial, Helvetica, sans-serif; fill: #69758a; }
+      .node { fill: rgba(255,255,255,0.74); stroke-width: 2.5; filter: url(#shadow); }
+      .thin { stroke-width: 2.2; fill: none; }
+      .dash { stroke-dasharray: 7 7; }
+    </style>
+  </defs>
+
+  <rect width="1600" height="900" fill="url(#soft-bg)"/>
+
+  <text x="44" y="56" class="title">Post-Consultation Agentic Workflow</text>
+
+  <text x="535" y="166" class="main-title">Euexia -- Current Agentic AI Workflow</text>
+  <text x="545" y="191" class="subtitle">Multimodal upload to Gemma 4 care plan, quest map, checklist, and RAG chat</text>
+
+  <!-- Model legend -->
+  <rect x="1262" y="154" width="292" height="78" rx="6" fill="#f8fbff" stroke="#dce7f3" filter="url(#shadow)"/>
+  <text x="1378" y="175" class="small-title" text-anchor="middle" fill="#344155">Model Legend</text>
+  <rect x="1290" y="188" width="10" height="10" rx="2" fill="#8b5cf6"/>
+  <text x="1320" y="197" class="legend">= Gemma 4 26B MaaS on Vertex AI</text>
+  <circle cx="1295" cy="214" r="7" fill="none" stroke="#111827" stroke-width="2"/>
+  <path d="M1289 214 C1290 206, 1302 206, 1301 214 C1300 222, 1288 222, 1289 214" fill="none" stroke="#111827" stroke-width="1.4"/>
+  <text x="1320" y="218" class="legend">= deterministic rules / app code</text>
+
+  <!-- Left uploads -->
+  <text x="110" y="217" class="patient-label">Patient</text>
+  <text x="102" y="238" class="patient-label">Uploads</text>
+
+  <rect x="80" y="238" width="128" height="66" rx="6" fill="#f8f5ff" stroke="#8b5cf6" stroke-width="2.5"/>
+  <text x="144" y="276" text-anchor="middle" class="box-title" fill="#8b5cf6">Voice</text>
+
+  <rect x="80" y="314" width="128" height="66" rx="6" fill="#eff6ff" stroke="#3b82f6" stroke-width="2.5"/>
+  <text x="144" y="352" text-anchor="middle" class="box-title" fill="#3b82f6">Text</text>
+
+  <rect x="80" y="390" width="128" height="66" rx="6" fill="#ecfdf5" stroke="#10b981" stroke-width="2.5"/>
+  <text x="144" y="428" text-anchor="middle" class="box-title" fill="#10b981">Image</text>
+
+  <rect x="80" y="466" width="128" height="66" rx="6" fill="#fff7ed" stroke="#f59e0b" stroke-width="2.5"/>
+  <text x="144" y="504" text-anchor="middle" class="box-title" fill="#f59e0b">PDF</text>
+
+  <!-- Parallel agents -->
+  <text x="366" y="200" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-weight="700" font-size="22" fill="#3b82f6">Step 1</text>
+  <text x="366" y="224" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-weight="700" font-size="22" fill="#3b82f6">Parallel Extraction Agents</text>
+  <rect x="256" y="222" width="218" height="312" rx="6" fill="#fbfdff" stroke="#8b5cf6" stroke-width="2.5" filter="url(#shadow)"/>
+
+  <path d="M208 271 L256 264" class="thin" stroke="#8b5cf6" marker-end="url(#arrow-purple)"/>
+  <path d="M208 347 L256 339" class="thin" stroke="#3b82f6" marker-end="url(#arrow-blue)"/>
+  <path d="M208 423 L256 415" class="thin" stroke="#10b981" marker-end="url(#arrow-green)"/>
+  <path d="M208 499 L256 493" class="thin" stroke="#f59e0b" marker-end="url(#arrow-orange)"/>
+
+  <rect x="258" y="298" width="216" height="8" rx="4" fill="#3b82f6"/>
+  <rect x="258" y="374" width="216" height="8" rx="4" fill="#10b981"/>
+  <rect x="258" y="450" width="216" height="8" rx="4" fill="#f59e0b"/>
+
+  <rect x="292" y="242" width="9" height="9" rx="2" fill="#8b5cf6"/>
+  <text x="316" y="252" class="small-title" fill="#8b5cf6">Voice Agent</text>
+  <text x="300" y="286" class="tiny">ASR path + Gemma 4 summary</text>
+  <text x="300" y="303" class="tiny">Speech-to-Text required in prod</text>
+
+  <rect x="292" y="318" width="9" height="9" rx="2" fill="#8b5cf6"/>
+  <text x="316" y="328" class="small-title" fill="#3b82f6">Text Agent</text>
+  <text x="306" y="362" class="tiny">Gemma 4 text extraction</text>
+
+  <rect x="292" y="394" width="9" height="9" rx="2" fill="#8b5cf6"/>
+  <text x="316" y="404" class="small-title" fill="#10b981">Image Agent</text>
+  <text x="302" y="438" class="tiny">Gemma 4 vision extraction</text>
+
+  <rect x="292" y="470" width="9" height="9" rx="2" fill="#8b5cf6"/>
+  <text x="316" y="480" class="small-title" fill="#f59e0b">PDF Agent</text>
+  <text x="300" y="514" class="tiny">pdf-parse + Gemma 4 text</text>
+
+  <rect x="292" y="544" width="150" height="46" rx="5" fill="#fff7ed" stroke="#f59e0b"/>
+  <text x="367" y="566" text-anchor="middle" class="tiny" font-weight="700" fill="#f59e0b">Medication Extractor</text>
+  <text x="367" y="582" text-anchor="middle" class="tiny">rule-based safety net</text>
+  <path d="M143 532 C148 615, 138 684, 134 752" class="thin" stroke="#06b6d4" marker-end="url(#arrow-cyan)"/>
+
+  <!-- Summary agent -->
+  <rect x="540" y="218" width="205" height="316" rx="7" class="node" stroke="#06b6d4"/>
+  <text x="642" y="250" text-anchor="middle" class="step">Step 2</text>
+  <text x="642" y="289" text-anchor="middle" class="box-title" fill="#06b6d4">Summary Agent</text>
+  <text x="642" y="320" text-anchor="middle" class="body">Gemma 4 on Vertex AI</text>
+  <text x="642" y="366" text-anchor="middle" class="body">Merges upload summaries</text>
+  <text x="642" y="385" text-anchor="middle" class="body">with mandatory medication</text>
+  <text x="642" y="404" text-anchor="middle" class="body">list, then patches misses</text>
+  <rect x="590" y="492" width="10" height="10" rx="2" fill="#8b5cf6"/>
+  <text x="671" y="501" class="tiny" fill="#06b6d4">Gemma 4</text>
+
+  <path d="M474 264 L540 370" class="thin" stroke="#94a3b8" marker-end="url(#arrow-cyan)"/>
+  <path d="M474 339 L540 380" class="thin" stroke="#94a3b8" marker-end="url(#arrow-cyan)"/>
+  <path d="M474 415 L540 390" class="thin" stroke="#94a3b8" marker-end="url(#arrow-cyan)"/>
+  <path d="M474 493 L540 400" class="thin" stroke="#94a3b8" marker-end="url(#arrow-cyan)"/>
+  <path d="M442 567 C478 546, 512 522, 540 494" class="thin" stroke="#f59e0b" marker-end="url(#arrow-orange)"/>
+
+  <!-- Checklist agent -->
+  <rect x="818" y="218" width="205" height="316" rx="7" class="node" stroke="#f43f5e"/>
+  <text x="920" y="250" text-anchor="middle" class="step">Step 3</text>
+  <text x="920" y="289" text-anchor="middle" class="box-title" fill="#f43f5e">Checklist Agent</text>
+  <text x="920" y="320" text-anchor="middle" class="body">Gemma 4 JSON events</text>
+  <text x="920" y="366" text-anchor="middle" class="body">Structures meds, tests,</text>
+  <text x="920" y="385" text-anchor="middle" class="body">appointments, monitoring,</text>
+  <text x="920" y="404" text-anchor="middle" class="body">lifestyle into day events</text>
+  <text x="920" y="448" text-anchor="middle" class="body">dedupe + validation</text>
+  <text x="920" y="467" text-anchor="middle" class="body">before save</text>
+  <circle cx="920" cy="495" r="18" fill="none" stroke="#111827" stroke-width="2"/>
+  <path d="M907 495 C910 476, 932 477, 933 495 C930 515, 906 514, 907 495" fill="none" stroke="#111827" stroke-width="1.7"/>
+  <path d="M745 374 L818 374" class="thin" stroke="#06b6d4" marker-end="url(#arrow-cyan)"/>
+
+  <!-- MongoDB -->
+  <rect x="1096" y="218" width="172" height="316" rx="7" class="node" stroke="#10b981"/>
+  <text x="1182" y="250" text-anchor="middle" class="step">Step 4</text>
+  <text x="1182" y="289" text-anchor="middle" class="box-title" fill="#10b981">MongoDB</text>
+  <path d="M1177 345 C1162 365, 1165 382, 1182 396 C1199 381, 1200 363, 1187 345 C1190 362, 1189 378, 1182 394 C1176 378, 1174 363, 1177 345Z" fill="#10b981"/>
+  <text x="1182" y="448" text-anchor="middle" class="body">Consultations</text>
+  <text x="1182" y="466" text-anchor="middle" class="body">Checklist Items</text>
+  <text x="1182" y="484" text-anchor="middle" class="body">Maps + Game Progress</text>
+  <text x="1182" y="502" text-anchor="middle" class="body">Context Chunks</text>
+  <text x="1182" y="520" text-anchor="middle" class="body">Chat History</text>
+  <path d="M1023 374 L1096 374" class="thin" stroke="#f43f5e" marker-end="url(#arrow-pink)"/>
+
+  <!-- Patient experience -->
+  <rect x="1342" y="218" width="174" height="316" rx="7" class="node" stroke="#06b6d4"/>
+  <text x="1429" y="260" text-anchor="middle" class="box-title" fill="#06b6d4">Patient</text>
+  <text x="1429" y="292" text-anchor="middle" class="box-title" fill="#06b6d4">Experience</text>
+  <text x="1429" y="334" text-anchor="middle" class="small-title" fill="#f59e0b">Recovery Map</text>
+  <text x="1429" y="368" text-anchor="middle" class="small-title" fill="#f59e0b">Day Stars + Tasks</text>
+  <text x="1429" y="402" text-anchor="middle" class="small-title" fill="#f43f5e">Checklist</text>
+  <text x="1429" y="436" text-anchor="middle" class="small-title" fill="#10b981">XP, Coins, Levels</text>
+  <text x="1429" y="470" text-anchor="middle" class="small-title" fill="#8b5cf6">Dr. Gemma Chat</text>
+  <text x="1429" y="504" text-anchor="middle" class="small-title" fill="#06b6d4">Leaderboard + Profile</text>
+  <path d="M1268 374 L1342 374" class="thin" stroke="#10b981" marker-end="url(#arrow-green)"/>
+
+  <!-- Map generator -->
+  <rect x="1004" y="614" width="266" height="260" rx="7" class="node" stroke="#f59e0b"/>
+  <text x="1137" y="648" text-anchor="middle" class="step">Step 5</text>
+  <text x="1137" y="685" text-anchor="middle" class="box-title" fill="#f59e0b">Map Generator</text>
+  <text x="1137" y="718" text-anchor="middle" class="body">Algorithmic default</text>
+  <text x="1137" y="738" text-anchor="middle" class="body">Gemma 4 optional AI map</text>
+  <text x="1137" y="773" text-anchor="middle" class="body">One star per day/group</text>
+  <text x="1137" y="792" text-anchor="middle" class="body">Pixi/Kenney hex map</text>
+  <text x="1137" y="811" text-anchor="middle" class="body">Walking animation + sync</text>
+  <path d="M1182 534 C1176 574, 1158 598, 1137 614" class="thin" stroke="#10b981" marker-end="url(#arrow-green)"/>
+  <path d="M1270 745 C1305 650, 1355 575, 1429 534" class="thin" stroke="#f59e0b" marker-end="url(#arrow-orange)"/>
+
+  <!-- RAG Pipeline -->
+  <rect x="126" y="650" width="790" height="224" rx="7" fill="#fbfdff" stroke="#8b5cf6" stroke-width="2.5" filter="url(#shadow)"/>
+  <text x="521" y="687" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-weight="700" font-size="23" fill="#8b5cf6">Step 6 -- Dr. Gemma Chat (RAG Pipeline)</text>
+
+  <rect x="158" y="720" width="180" height="124" rx="6" fill="#f5f8ff" stroke="#3b82f6" stroke-width="2"/>
+  <text x="248" y="750" text-anchor="middle" class="small-title" fill="#3b82f6">Question</text>
+  <text x="248" y="772" text-anchor="middle" class="small-title" fill="#3b82f6">Condenser</text>
+  <text x="248" y="805" text-anchor="middle" class="tiny">Gemma 4 + recent chat</text>
+  <text x="248" y="825" text-anchor="middle" class="tiny">standalone question</text>
+  <rect x="208" y="827" width="9" height="9" rx="2" fill="#8b5cf6"/>
+
+  <rect x="404" y="720" width="234" height="124" rx="6" fill="#f3fffb" stroke="#10b981" stroke-width="2"/>
+  <text x="521" y="750" text-anchor="middle" class="small-title" fill="#10b981">Context Retriever</text>
+  <text x="521" y="789" text-anchor="middle" class="tiny">Atlas Vector Search or</text>
+  <text x="521" y="807" text-anchor="middle" class="tiny">cosine fallback + MMR</text>
+  <text x="521" y="825" text-anchor="middle" class="tiny">active tasks + progress</text>
+
+  <rect x="652" y="720" width="232" height="124" rx="6" fill="#f0fcff" stroke="#06b6d4" stroke-width="2"/>
+  <text x="768" y="750" text-anchor="middle" class="small-title" fill="#06b6d4">Response Generator</text>
+  <text x="768" y="789" text-anchor="middle" class="tiny">Gemma 4 answer</text>
+  <text x="768" y="807" text-anchor="middle" class="tiny">post-process + dedupe</text>
+  <text x="768" y="825" text-anchor="middle" class="tiny">save assistant response</text>
+  <rect x="708" y="827" width="9" height="9" rx="2" fill="#8b5cf6"/>
+
+  <path d="M338 782 L404 782" class="thin" stroke="#3b82f6" marker-end="url(#arrow-blue)"/>
+  <path d="M638 782 L652 782" class="thin" stroke="#10b981" marker-end="url(#arrow-green)"/>
+  <path d="M884 782 C1060 725, 1230 626, 1429 534" class="thin" stroke="#8b5cf6" marker-end="url(#arrow-purple)"/>
+  <path d="M1096 528 C1010 556, 942 630, 884 750" class="thin" stroke="#10b981" marker-end="url(#arrow-green)"/>
+  <path d="M1182 614 C1176 578, 1178 552, 1182 534" class="thin" stroke="#10b981" marker-end="url(#arrow-green)"/>
+
+  <!-- Small workflow notes -->
+  <rect x="536" y="556" width="452" height="58" rx="6" fill="#f8fbff" stroke="#cbd5e1"/>
+  <text x="762" y="575" text-anchor="middle" class="tiny" font-weight="700" fill="#334155">Safety and consistency updates</text>
+  <text x="762" y="592" text-anchor="middle" class="tiny">same-day medication unlocks, duplicate-dose sync</text>
+  <text x="762" y="607" text-anchor="middle" class="tiny">refreshed timing after each completion</text>
+
+  <!-- Cloud callout -->
+  <rect x="1028" y="98" width="224" height="44" rx="8" fill="#ecfeff" stroke="#06b6d4"/>
+  <text x="1140" y="117" text-anchor="middle" class="tiny" font-weight="700" fill="#0e7490">Vertex AI MaaS</text>
+  <text x="1140" y="134" text-anchor="middle" class="tiny">usage based, no GPU endpoint</text>
+</svg>

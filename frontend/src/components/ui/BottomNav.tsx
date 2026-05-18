@@ -4,11 +4,11 @@ import { motion } from 'framer-motion';
 import { ClipboardList, Map, ScrollText, Trophy, UploadCloud } from 'lucide-react';
 
 const navItems = [
-  { path: '/dashboard', label: 'Map', icon: Map, accent: 'from-emerald-400 to-cyan-400' },
-  { path: '/consultations', label: 'Logs', icon: ScrollText, accent: 'from-sky-400 to-blue-500' },
-  { path: '/upload', label: 'Upload', icon: UploadCloud, accent: 'from-orange-300 to-amber-500' },
-  { path: '/checklist', label: 'Quests', icon: ClipboardList, accent: 'from-lime-300 to-emerald-500' },
-  { path: '/leaderboard', label: 'Rank', icon: Trophy, accent: 'from-fuchsia-300 to-violet-500' },
+  { path: '/dashboard', label: 'Map', icon: Map, accent: 'from-teal-400 to-cyan-500' },
+  { path: '/consultations', label: 'Logs', icon: ScrollText, accent: 'from-sky-400 to-blue-600' },
+  { path: '/upload', label: 'Upload', icon: UploadCloud, accent: 'from-teal-400 to-blue-600' },
+  { path: '/checklist', label: 'Quests', icon: ClipboardList, accent: 'from-cyan-400 to-teal-500' },
+  { path: '/leaderboard', label: 'Rank', icon: Trophy, accent: 'from-blue-400 to-teal-500' },
 ];
 
 export default function BottomNav() {
@@ -24,8 +24,8 @@ export default function BottomNav() {
       className="bottom-nav fixed bottom-0 left-0 right-0 z-50 px-3 pb-2"
     >
       <div className="quest-shell">
-        <div className="relative flex items-center justify-around rounded-[1.65rem] border border-white/10 bg-slate-950/80 px-2 py-1.5 shadow-2xl shadow-slate-950/50 backdrop-blur-xl">
-          <div className="absolute inset-x-10 top-0 h-px bg-gradient-to-r from-transparent via-white/45 to-transparent" />
+        <div className="relative flex items-center justify-around rounded-[1.65rem] border border-blue-200/70 bg-white/90 px-2 py-1.5 shadow-2xl shadow-blue-900/10 backdrop-blur-xl">
+          <div className="absolute inset-x-10 top-0 h-px bg-gradient-to-r from-transparent via-cyan-300/75 to-transparent" />
         {navItems.map((item) => {
           const isActive = pathname === item.path;
           const Icon = item.icon;
@@ -36,7 +36,7 @@ export default function BottomNav() {
               className={`relative flex min-w-0 flex-1 flex-col items-center gap-1 rounded-[1.25rem] px-1 py-1.5 transition-all ${
                 isActive
                   ? 'scale-[1.04] text-white'
-                  : 'text-slate-500 opacity-80 hover:bg-white/5 hover:text-slate-200'
+                  : 'text-slate-500 opacity-90 hover:bg-cyan-50 hover:text-blue-700'
               }`}
             >
               {isActive && (
@@ -49,7 +49,7 @@ export default function BottomNav() {
                 className={`relative grid h-7 w-7 place-items-center rounded-[0.9rem] border transition ${
                   isActive
                     ? 'border-white/25 bg-white/18 text-white shadow-sm'
-                    : 'border-white/5 bg-slate-900/40 text-slate-400'
+                    : 'border-blue-100 bg-white text-slate-400 shadow-sm'
                 }`}
               >
                 <Icon className="h-[18px] w-[18px]" strokeWidth={2.4} />

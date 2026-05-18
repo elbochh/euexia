@@ -263,14 +263,18 @@ export const useGameStore = create<GameStore>((set, get) => ({
       const res = await checklistApi.complete(itemId);
       const reward: RewardPopup = res.data.reward;
       const updatedItem = res.data.item;
+      const updatedItems = Array.isArray(res.data.updatedItems) && res.data.updatedItems.length > 0
+        ? res.data.updatedItems
+        : [updatedItem];
+      const updatedById = new Map(updatedItems.map((item: ChecklistItem) => [item._id, item]));
 
-      // Update checklist item locally with the full item from the server
+      // Update all server-returned rows locally so the map and checklist stay in sync
+      // without forcing a full checklist refetch during map animations.
       set((state) => ({
-        checklist: state.checklist.map((item) =>
-          item._id === itemId
-            ? { ...item, ...updatedItem }
-            : item
-        ),
+        checklist: state.checklist.map((item) => {
+          const replacement = updatedById.get(item._id);
+          return replacement ? { ...item, ...replacement } : item;
+        }),
         rewardPopup: reward,
         progress: state.progress
           ? {
@@ -451,4 +455,3 @@ export const useGameStore = create<GameStore>((set, get) => ({
     }
   },
 }));
-

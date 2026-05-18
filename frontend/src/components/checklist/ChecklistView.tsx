@@ -68,6 +68,54 @@ function localDayKey(date: Date): string {
   return `${year}-${month}-${day}`;
 }
 
+function medicationDayFromDescription(description?: string): string | null {
+  const match = String(description ?? '').match(/\bDay\s+(\d+)\s+of\b/i);
+  return match ? match[1] : null;
+}
+
+function normalizedMedicationTitle(title?: string): string {
+  return String(title ?? '').toLowerCase().replace(/\(\d+\/\d+\)$/g, '').replace(/\s+/g, ' ').trim();
+}
+
+function logicalChecklistKey(item: ChecklistItemType): string {
+  if (item.category !== 'medication') return item._id;
+  const day = medicationDayFromDescription(item.description)
+    ?? (item.unlockAt ? localDayKey(new Date(item.unlockAt)) : 'today');
+  const slot = item.unlockAt
+    ? String(new Date(item.unlockAt).getHours()).padStart(2, '0')
+    : String(item.orderInGroup ?? 0);
+  return `${normalizedMedicationTitle(item.title)}_${day}_${slot}`;
+}
+
+function mergeDuplicateChecklistItems(items: ChecklistItemType[]): ChecklistItemType[] {
+  const byKey = new Map<string, ChecklistItemType>();
+
+  for (const item of items) {
+    const key = logicalChecklistKey(item);
+    const existing = byKey.get(key);
+    if (!existing) {
+      byKey.set(key, item);
+      continue;
+    }
+
+    const merged = {
+      ...existing,
+      isCompleted: existing.isCompleted || item.isCompleted,
+      isFullyDone: existing.isFullyDone || item.isFullyDone,
+      isLocked: Boolean(existing.isLocked && item.isLocked),
+      isOnCooldown: Boolean(existing.isOnCooldown && item.isOnCooldown),
+      isAvailable: Boolean(existing.isAvailable || item.isAvailable),
+      remainingSeconds: Math.min(existing.remainingSeconds ?? 0, item.remainingSeconds ?? 0),
+    };
+
+    const existingScore = [existing.description, existing.unlockAt, existing.nextDueAt].filter(Boolean).length;
+    const itemScore = [item.description, item.unlockAt, item.nextDueAt].filter(Boolean).length;
+    byKey.set(key, itemScore > existingScore ? { ...item, ...merged } : merged);
+  }
+
+  return Array.from(byKey.values()).sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+}
+
 /** Group tasks by day based on unlockAt or nextDueAt */
 function groupTasksByDay(tasks: ChecklistItemType[]): Map<string, ChecklistItemType[]> {
   const groups = new Map<string, ChecklistItemType[]>();
@@ -100,19 +148,20 @@ function groupTasksByDay(tasks: ChecklistItemType[]): Map<string, ChecklistItemT
 
 export default function ChecklistView() {
   const { checklist, completeItem, isLoading } = useGameStore();
+  const displayChecklist = mergeDuplicateChecklistItems(checklist);
 
   // Separate items into groups based on their timing state
-  const available = checklist.filter(
+  const available = displayChecklist.filter(
     (i) => i.isAvailable && !i.isCompleted && !i.isFullyDone
   );
-  const lockedOrCooldown = checklist.filter(
+  const lockedOrCooldown = displayChecklist.filter(
     (i) => (i.isLocked || i.isOnCooldown) && !i.isFullyDone
   );
-  const completedThisCycle = checklist.filter(
+  const completedThisCycle = displayChecklist.filter(
     (i) => i.isCompleted && !i.isFullyDone && !i.isOnCooldown && !i.isLocked
   );
-  const fullyDone = checklist.filter((i) => i.isFullyDone);
-  const expired = checklist.filter((i) => i.isExpired && !i.isFullyDone);
+  const fullyDone = displayChecklist.filter((i) => i.isFullyDone);
+  const expired = displayChecklist.filter((i) => i.isExpired && !i.isFullyDone);
 
   // Group locked/cooldown tasks by day
   const lockedByDay = groupTasksByDay(lockedOrCooldown);
@@ -120,8 +169,8 @@ export default function ChecklistView() {
 
   const totalDone = fullyDone.length + completedThisCycle.length;
   const progress =
-    checklist.length > 0
-      ? Math.round((totalDone / checklist.length) * 100)
+    displayChecklist.length > 0
+      ? Math.round((totalDone / displayChecklist.length) * 100)
     : 0;
 
   if (isLoading) {
@@ -138,7 +187,7 @@ export default function ChecklistView() {
     );
   }
 
-  if (checklist.length === 0) {
+  if (displayChecklist.length === 0) {
     return (
       <div className="text-center py-16">
         <div className="text-6xl mb-4">📋</div>
@@ -158,7 +207,7 @@ export default function ChecklistView() {
         <div className="flex items-center justify-between mb-2">
           <span className="text-sm font-black text-white">Quest Progress</span>
           <span className="soft-badge text-emerald-100">
-            {totalDone}/{checklist.length}
+            {totalDone}/{displayChecklist.length}
           </span>
         </div>
         <div className="h-3.5 bg-slate-950/70 rounded-full overflow-hidden border border-white/10">

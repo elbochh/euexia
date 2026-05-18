@@ -28,10 +28,10 @@ const config: Config = {
           600: '#d97706',
         },
         game: {
-          bg: '#1a1a2e',
-          panel: '#16213e',
-          accent: '#0f3460',
-          highlight: '#e94560',
+          bg: '#f5fbff',
+          panel: '#ffffff',
+          accent: '#0ea5b7',
+          highlight: '#1466c8',
         },
       },
       fontFamily: {
@@ -64,4 +64,3 @@ const config: Config = {
 };
 
 export default config;
-

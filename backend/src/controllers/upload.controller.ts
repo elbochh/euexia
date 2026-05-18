@@ -183,9 +183,13 @@ export const createConsultation = async (req: AuthRequest, res: Response): Promi
     // Additional deduplication: remove exact duplicate events while preserving same-day multiple doses.
     const seenBeforeSave = new Map<string, boolean>();
     const deduplicatedEvents = eventData.filter((event) => {
-      const unlockTime = new Date(event.unlockAt).toISOString();
+      const unlockDate = new Date(event.unlockAt);
+      const unlockTime = unlockDate.toISOString();
       const sequenceId = event.sequenceId || event.groupId || '';
-      const key = `${event.category}_${sequenceId}_${event.title.toLowerCase().trim()}_${unlockTime}_${event.orderInGroup}`;
+      const normalizedTitle = event.title.toLowerCase().replace(/\(\d+\/\d+\)$/g, '').trim();
+      const key = event.category === 'medication'
+        ? `${event.category}_${normalizedTitle}_${unlockDate.toISOString().slice(0, 13)}`
+        : `${event.category}_${sequenceId}_${normalizedTitle}_${unlockTime}_${event.orderInGroup}`;
       
       if (seenBeforeSave.has(key)) {
         console.warn(`[Checklist] Duplicate event filtered before save: ${event.title} (category: ${event.category}, time: ${unlockTime})`);
@@ -236,10 +240,12 @@ export const createConsultation = async (req: AuthRequest, res: Response): Promi
           const isToday = eventDateStart.getTime() === todayStart.getTime();
           
           if (isFirstDose && isToday) {
-            // First dose of medication scheduled for today → unlock immediately
+            // First dose scheduled for today starts immediately.
+            // Later same-day doses keep their clock time for display, but the checklist
+            // controller does not time-lock same-day medication doses.
             unlockAt = null;
           }
-          // For second dose onwards (orderInGroup > 0) or future days, keep unlockAt as is
+          // Future-day medications keep unlockAt as is.
           // They will unlock after the previous dose is completed (via group locking logic)
         }
         

@@ -145,14 +145,14 @@ export default function DoctorChatModal({
 
   return (
     <AnimatePresence>
-      <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-3 sm:p-4 bg-black/60 backdrop-blur-sm">
+      <div className="fixed inset-x-0 top-0 bottom-[5.75rem] z-[45] flex items-end justify-center p-3 pb-1 sm:items-center sm:p-4 bg-black/30 backdrop-blur-sm">
         <motion.div
           initial={{ opacity: 0, scale: 0.96, y: 8 }}
           animate={{ opacity: 1, scale: 1, y: 0 }}
           exit={{ opacity: 0, scale: 0.98, y: 8 }}
-          className="game-card w-full max-w-xl h-[75vh] sm:h-[680px] flex flex-col"
+          className="game-card w-full max-w-xl h-full max-h-[calc(100vh-6.5rem)] sm:h-[680px] flex flex-col"
         >
-          <div className="flex items-center justify-between pb-3 border-b border-white/10">
+          <div className="flex items-center justify-between pb-3 border-b border-blue-100">
             <div className="flex items-center gap-3">
               <div className="text-2xl">👨‍⚕️</div>
               <div>
@@ -164,11 +164,11 @@ export default function DoctorChatModal({
             </div>
             <button
               onClick={onClose}
-              className="p-2 rounded-md hover:bg-white/10 transition-colors"
+              className="p-2 rounded-md hover:bg-cyan-50 transition-colors"
               aria-label="Close doctor chat"
             >
               <svg
-                className="w-5 h-5 text-gray-300"
+                className="w-5 h-5 text-slate-500"
                 fill="none"
                 strokeLinecap="round"
                 strokeLinejoin="round"
@@ -181,7 +181,7 @@ export default function DoctorChatModal({
             </button>
           </div>
 
-          <div ref={scrollRef} className="flex-1 overflow-y-auto py-3 space-y-3">
+          <div ref={scrollRef} className="flex-1 min-h-0 overflow-y-auto py-3 space-y-3">
             {isLoadingHistory && (
               <div className="text-center text-sm text-gray-400 py-6">Loading conversation...</div>
             )}
@@ -201,8 +201,8 @@ export default function DoctorChatModal({
                   <div
                     className={`max-w-[85%] px-3 py-2 rounded-xl text-sm ${
                       isUser
-                        ? 'bg-blue-500/25 text-blue-100 border border-blue-400/30 whitespace-pre-wrap'
-                        : 'bg-white/10 text-gray-100 border border-white/10 space-y-1'
+                        ? 'bg-gradient-to-r from-teal-500 to-blue-600 text-white border border-cyan-200/40 whitespace-pre-wrap shadow-lg shadow-cyan-500/10'
+                        : 'bg-white text-slate-700 border border-blue-100 space-y-1 shadow-sm'
                     }`}
                   >
                     {isUser ? m.content : renderMarkdown(m.content)}
@@ -213,15 +213,15 @@ export default function DoctorChatModal({
 
             {isSending && (
               <div className="flex justify-start">
-                <div className="max-w-[70%] px-3 py-2 rounded-xl text-sm bg-white/10 border border-white/10 text-gray-300">
+                <div className="max-w-[70%] px-3 py-2 rounded-xl text-sm bg-white border border-blue-100 text-slate-500 shadow-sm">
                   Thinking...
                 </div>
               </div>
             )}
           </div>
 
-          <div className="pt-2 border-t border-white/10">
-            {error && <p className="text-xs text-red-300 mb-2">{error}</p>}
+          <div className="shrink-0 pt-2 border-t border-blue-100 bg-white/30">
+            {error && <p className="text-xs text-red-500 mb-2">{error}</p>}
             <div className="flex gap-2">
               <input
                 value={input}
@@ -233,7 +233,7 @@ export default function DoctorChatModal({
                   }
                 }}
                 placeholder="Ask your doctor assistant..."
-                className="flex-1 rounded-lg bg-black/30 border border-white/15 px-3 py-2 text-sm text-white placeholder:text-gray-400 focus:outline-none focus:ring-1 focus:ring-blue-400"
+                className="flex-1 rounded-lg bg-white border border-blue-100 px-3 py-2 text-sm text-[#0b1f58] placeholder:text-slate-400 shadow-sm focus:outline-none focus:ring-2 focus:ring-cyan-300/50"
               />
               <button
                 onClick={handleSend}
@@ -249,4 +249,3 @@ export default function DoctorChatModal({
     </AnimatePresence>
   );
 }
-

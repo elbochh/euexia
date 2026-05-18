@@ -44,6 +44,7 @@ interface GameCanvasProps {
   playerCharacterId?: string;
   introMessage?: string;
   companionMessage?: string;
+  advanceKey?: string;
   onCompanionMessageDone?: () => void;
 }
 
@@ -59,12 +60,14 @@ export default function GameCanvas({
   playerCharacterId,
   introMessage,
   companionMessage,
+  advanceKey,
   onCompanionMessageDone,
 }: GameCanvasProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const appRef = useRef<Application | null>(null);
   const renderSeqRef = useRef(0);
   const lastCompletedRef = useRef(0);
+  const lastAdvanceKeyRef = useRef<string | undefined>(undefined);
   const lastMapKeyRef = useRef('');
   const scrollContainerRef = useRef<Container | null>(null);
   const scrollYRef = useRef(0);
@@ -665,10 +668,6 @@ export default function GameCanvas({
         y: starPixels[starPixels.length - 1].y - 40,
       };
 
-      const initialFocus = starPixels[activeIdx] ?? startFlagPixel;
-      scrollYRef.current = clamp(initialFocus.y - height * 0.62, 0, maxScrollYRef.current);
-      scrollContainer.y = -scrollYRef.current;
-
       // ── Dotted path (quadratic Bézier arcs between nodes) ─────────────────
       const allPathPts = [startFlagPixel, ...starPixels, endFlagPixel];
       const pathGfx = new Graphics();
@@ -926,6 +925,27 @@ export default function GameCanvas({
         return { x: dx, y: sy + COIN_FLOAT + 8 };
       };
 
+      const getCurvedWalkPoint = (
+        from: { x: number; y: number },
+        to: { x: number; y: number },
+        t: number,
+        curveSide: number
+      ) => {
+        const dx = to.x - from.x;
+        const dy = to.y - from.y;
+        const dist = Math.max(1, Math.sqrt(dx * dx + dy * dy));
+        const nx = -dy / dist;
+        const ny = dx / dist;
+        const arc = Math.min(46, dist * 0.24);
+        const cpx = (from.x + to.x) / 2 + nx * arc * curveSide;
+        const cpy = (from.y + to.y) / 2 + ny * arc * curveSide;
+
+        return {
+          x: bezier(from.x, cpx, to.x, t),
+          y: bezier(from.y, cpy, to.y, t),
+        };
+      };
+
       const createDoctorBubble = (message: string) => {
         const bubbleWidth = Math.min(260, Math.max(210, width - 70));
         const bubbleHeight = 84;
@@ -1141,19 +1161,26 @@ export default function GameCanvas({
       if (isNewMap) {
         lastMapKeyRef.current = mapKey;
         lastCompletedRef.current = introMessage ? -1 : progressIdx;
+        lastAdvanceKeyRef.current = undefined;
       }
-      const forcedStartIdx = introMessage ? -1 : companionMessage ? Math.max(-1, progressIdx - 1) : null;
+      const hasNewAdvance = Boolean(advanceKey && advanceKey !== lastAdvanceKeyRef.current);
+      const forcedStartIdx = introMessage ? -1 : hasNewAdvance ? Math.max(-1, progressIdx - 1) : null;
       const previousProgress = forcedStartIdx ?? Math.max(-1, Math.min(lastCompletedRef.current, starCount - 1));
-      const shouldPlayWalk = progressIdx > previousProgress || Boolean(introMessage || companionMessage);
-      lastCompletedRef.current = progressIdx;
+      const hasProgressIncrease = progressIdx > previousProgress;
+      const shouldPlayWalk = Boolean(introMessage) || (hasProgressIncrease && hasNewAdvance);
+      const waitingForAdvance = hasProgressIncrease && !shouldPlayWalk;
+      if (!waitingForAdvance) {
+        lastCompletedRef.current = progressIdx;
+        if (hasNewAdvance) lastAdvanceKeyRef.current = advanceKey;
+      }
 
       const startPos = getPlayerPos(previousProgress);
-      const currentPos = getPlayerPos(progressIdx);
+      const currentPos = getPlayerPos(waitingForAdvance ? previousProgress : progressIdx);
       let x = shouldPlayWalk ? startPos.x : currentPos.x;
       let y = shouldPlayWalk ? startPos.y : currentPos.y;
       let targetX = currentPos.x;
       let targetY = currentPos.y;
-      const walkDurationMs = introMessage ? 5200 : shouldPlayWalk ? 3600 : 2000;
+      const walkDurationMs = introMessage ? 5600 : shouldPlayWalk ? 4600 : 2000;
       const walkStart = performance.now();
       let isWalkingToNext = shouldPlayWalk;
       let isPlayerWalkingAnim = shouldPlayWalk;
@@ -1161,12 +1188,19 @@ export default function GameCanvas({
 
       // Doctor trails one star behind, on the opposite (right) side
       const docStartPos = getDoctorPos(previousProgress);
-      const docCurrentPos = getDoctorPos(progressIdx);
+      const docCurrentPos = getDoctorPos(waitingForAdvance ? previousProgress : progressIdx);
       let docX = shouldPlayWalk ? docStartPos.x : docCurrentPos.x;
       let docY = shouldPlayWalk ? docStartPos.y : docCurrentPos.y;
       let docTargetX = docCurrentPos.x;
       let docTargetY = docCurrentPos.y;
       doctorContainer.position.set(docX, docY);
+
+      const initialFocusIdx = waitingForAdvance || shouldPlayWalk ? previousProgress : progressIdx;
+      const initialFocus = initialFocusIdx < 0
+        ? startFlagPixel
+        : starPixels[initialFocusIdx] ?? startFlagPixel;
+      scrollYRef.current = clamp(initialFocus.y - height * 0.62, 0, maxScrollYRef.current);
+      scrollContainer.y = -scrollYRef.current;
       let activeBubble: Container | null = null;
       if (introMessage || companionMessage) {
         activeBubble = createDoctorBubble(companionMessage || introMessage || '');
@@ -1178,7 +1212,7 @@ export default function GameCanvas({
       app.ticker.add(() => {
         if (!isRenderActive()) return;
         tick += 0.03;
-        const liveIdx = activeIdx;
+        const liveIdx = waitingForAdvance ? previousProgress : activeIdx;
         const livePos = getPlayerPos(liveIdx);
         targetX = livePos.x; targetY = livePos.y;
         const liveDocPos = getDoctorPos(liveIdx);
@@ -1187,13 +1221,20 @@ export default function GameCanvas({
         if (isWalkingToNext) {
           const t = Math.min(1, (performance.now() - walkStart) / walkDurationMs);
           const ease = t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
-          x = startPos.x + (targetX - startPos.x) * ease;
-          y = startPos.y + (targetY - startPos.y) * ease;
-          docX = docStartPos.x + (docTargetX - docStartPos.x) * ease;
-          docY = docStartPos.y + (docTargetY - docStartPos.y) * ease;
+          const playerPoint = getCurvedWalkPoint(startPos, { x: targetX, y: targetY }, ease, 1);
+          const doctorPoint = getCurvedWalkPoint(docStartPos, { x: docTargetX, y: docTargetY }, ease, -1);
+          x = playerPoint.x;
+          y = playerPoint.y;
+          docX = doctorPoint.x;
+          docY = doctorPoint.y;
+          const desiredScrollY = clamp(y - height * 0.62, 0, maxScrollYRef.current);
+          scrollYRef.current += (desiredScrollY - scrollYRef.current) * 0.12;
+          scrollContainer.y = -scrollYRef.current;
           if (t >= 1) {
             isWalkingToNext = false;
             isPlayerWalkingAnim = false;
+            scrollYRef.current = clamp(targetY - height * 0.62, 0, maxScrollYRef.current);
+            scrollContainer.y = -scrollYRef.current;
             if (activeBubble) {
               const done = onCompanionMessageDone;
               fadeOutAndRemove(doctorContainer, activeBubble, companionMessage ? done : undefined);
@@ -1260,6 +1301,7 @@ export default function GameCanvas({
       playerCharacterId,
       introMessage,
       companionMessage,
+      advanceKey,
       onCompanionMessageDone,
     ]
   );
@@ -1312,7 +1354,7 @@ export default function GameCanvas({
         appRef.current.destroy(true); appRef.current = null;
       }
     };
-  }, [theme, completedCount, totalCount, mapSpec, drawMap, userName, introMessage, companionMessage]);
+  }, [theme, completedCount, totalCount, mapSpec, drawMap, userName, introMessage, companionMessage, advanceKey]);
 
   return (
     <div
