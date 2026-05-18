@@ -24,6 +24,8 @@ interface ChecklistItem {
   isCompleted: boolean;
   isLocked?: boolean;
   isAvailable?: boolean;
+  isFullyDone?: boolean;
+  isExpired?: boolean;
   xpReward: number;
   coinReward: number;
   category: string;
@@ -41,6 +43,8 @@ interface GameCanvasProps {
   userName?: string;
   playerCharacterId?: string;
   introMessage?: string;
+  companionMessage?: string;
+  onCompanionMessageDone?: () => void;
 }
 
 export default function GameCanvas({
@@ -54,6 +58,8 @@ export default function GameCanvas({
   userName,
   playerCharacterId,
   introMessage,
+  companionMessage,
+  onCompanionMessageDone,
 }: GameCanvasProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const appRef = useRef<Application | null>(null);
@@ -596,7 +602,7 @@ export default function GameCanvas({
       const COIN_R = Math.min(28, Math.max(18, Math.floor(width * 0.068)));
       const COIN_FLOAT = 25;
 
-      const routeRows = [47, 44, 41, 38, 35, 32, 29, 26, 23, 20, 17, 14, 11, 8, 5, 2];
+      const routeRows = [47, 42, 37, 33, 30, 27, 24, 21, 18, 15, 12, 9, 6, 3];
       const findRouteCell = (row: number, index: number) => {
         const safeRow = clamp(row, 0, GRID_ROWS - 1);
         const [left, right] = bounds[safeRow];
@@ -624,16 +630,19 @@ export default function GameCanvas({
 
       const pickPositions = (count: number) => {
         if (count <= 1) return [FULL_PATH[0]];
+        if (count === 2) return [FULL_PATH[0], FULL_PATH[Math.min(2, FULL_PATH.length - 1)]];
         const result: { row: number; col: number }[] = [];
-        for (let i = 0; i < count; i++) {
-          const t = i / (count - 1);
-          if (count <= FULL_PATH.length) {
-            const idx = Math.min(Math.round(t * (FULL_PATH.length - 1)), FULL_PATH.length - 1);
-            result.push(FULL_PATH[idx]);
-          } else {
-            const row = Math.round((TOTAL_ROWS - 1) - t * (TOTAL_ROWS - 3));
-            result.push(findRouteCell(row, i));
-          }
+        result.push(FULL_PATH[0]);
+        result.push(FULL_PATH[Math.min(2, FULL_PATH.length - 1)]);
+        const remaining = count - 2;
+        const remainingPathStart = Math.min(4, FULL_PATH.length - 1);
+        for (let i = 0; i < remaining; i++) {
+          const t = remaining <= 1 ? 1 : i / (remaining - 1);
+          const idx = Math.min(
+            remainingPathStart + Math.round(t * (FULL_PATH.length - 1 - remainingPathStart)),
+            FULL_PATH.length - 1
+          );
+          result.push(FULL_PATH[idx]);
         }
         return result;
       };
@@ -645,6 +654,7 @@ export default function GameCanvas({
         const sy = topSurfaceY(row, col);
         return { x, y: sy - COIN_FLOAT };
       });
+      const activeIdx = Math.max(0, Math.min(completed, starCount - 1));
 
       const startFlagPixel = {
         x: starPixels[0].x,
@@ -655,8 +665,7 @@ export default function GameCanvas({
         y: starPixels[starPixels.length - 1].y - 40,
       };
 
-      const initialFocusIdx = Math.max(-1, Math.min(completed - 1, starCount - 1));
-      const initialFocus = initialFocusIdx < 0 ? startFlagPixel : starPixels[initialFocusIdx];
+      const initialFocus = starPixels[activeIdx] ?? startFlagPixel;
       scrollYRef.current = clamp(initialFocus.y - height * 0.62, 0, maxScrollYRef.current);
       scrollContainer.y = -scrollYRef.current;
 
@@ -691,8 +700,7 @@ export default function GameCanvas({
           pathGfx.circle(bx, by - 1.6, 3.1);  pathGfx.fill({ color: 0xdff7ff, alpha: 0.7 });
         }
 
-        const segIdx = i - 1;
-        if (segIdx < completed) {
+        if (i < completed) {
           for (let j = 0; j <= numDots; j++) {
             const t = j / numDots;
             const bx = bezier(p1.x, cpx, p2.x, t);
@@ -723,10 +731,10 @@ export default function GameCanvas({
           (sum, e: ChecklistItem) => sum + (e.isCompleted ? e.coinReward || 0 : 0),
           0
         );
-        const isStarCompleted = eventsAtStar.some((e: ChecklistItem) => e.isCompleted);
+        const isStarCompleted = eventsAtStar.length > 0 && eventsAtStar.every((e: ChecklistItem) => e.isCompleted || e.isFullyDone);
         const hasAvailable = eventsAtStar.some((e: ChecklistItem) => !e.isCompleted && !e.isLocked);
         const isStarLocked = eventsAtStar.length > 0 && !isStarCompleted && !hasAvailable;
-        const isCurrent = index === completed;
+        const isCurrent = index === activeIdx;
         const isLocked = isStarLocked || (eventsAtStar.length === 0 && index > completed);
 
         const checkpoint = new Container();
@@ -918,6 +926,58 @@ export default function GameCanvas({
         return { x: dx, y: sy + COIN_FLOAT + 8 };
       };
 
+      const createDoctorBubble = (message: string) => {
+        const bubbleWidth = Math.min(260, Math.max(210, width - 70));
+        const bubbleHeight = 84;
+        const bubbleY = -(characterTargetHeight + 94);
+        const bubble = new Graphics();
+        bubble.roundRect(-bubbleWidth / 2, bubbleY, bubbleWidth, bubbleHeight, 12);
+        bubble.fill({ color: 0x020617, alpha: 0.96 });
+        bubble.stroke({ color: 0x38bdf8, width: 2 });
+
+        const bubbleText = new Text({
+          text: message,
+          style: new TextStyle({
+            fontSize: 13,
+            fill: '#e5e7eb',
+            fontFamily: 'Arial',
+            wordWrap: true,
+            wordWrapWidth: bubbleWidth - 20,
+            lineHeight: 19,
+          }),
+        });
+        bubbleText.anchor.set(0.5, 0.5);
+        bubbleText.position.set(0, bubbleY + bubbleHeight / 2);
+
+        const bubbleContainer = new Container();
+        bubbleContainer.addChild(bubble, bubbleText);
+        return bubbleContainer;
+      };
+
+      const fadeOutAndRemove = (
+        target: Container,
+        child: Container,
+        afterRemove?: () => void
+      ) => {
+        let fadeElapsed = 0;
+        const fadeDuration = 1200;
+        const fadeTicker = () => {
+          if (!isRenderActive()) {
+            app.ticker.remove(fadeTicker);
+            return;
+          }
+          fadeElapsed += (app.ticker.deltaMS || 16.67);
+          const ft = Math.min(1, fadeElapsed / fadeDuration);
+          child.alpha = 1 - ft;
+          if (ft >= 1) {
+            app.ticker.remove(fadeTicker);
+            if (child.parent === target) target.removeChild(child);
+            afterRemove?.();
+          }
+        };
+        app.ticker.add(fadeTicker);
+      };
+
       // ── Draw player ────────────────────────────────────────────────────────
       const player = new Container();
       let playerSprite: AnimatedSprite | null = null;
@@ -1074,87 +1134,17 @@ export default function GameCanvas({
       doctorContainer.addChild(doctor); doctorContainer.zIndex = 1000;
       scrollContainer.addChild(doctorContainer);
 
-      // ── Intro walk animation (first time per consultation) ─────────────────
-      if (introMessage) {
-        const originalPlayerX = player.position.x;
-        const originalDoctorX = doctorContainer.position.x + doctor.position.x;
-        const startOffset = Math.min(220, width * 0.48);
-        player.position.x = originalPlayerX - startOffset;
-        doctorContainer.position.x -= startOffset;
-
-        const bubble = new Graphics();
-        // Slightly wider & taller to avoid text clipping on mobile
-        const bubbleWidth = 240;
-        const bubbleHeight = 80;
-        const bubbleY = -(characterTargetHeight + 90);
-        bubble.roundRect(-bubbleWidth / 2, bubbleY, bubbleWidth, bubbleHeight, 12);
-        bubble.fill({ color: 0x020617, alpha: 0.96 });
-        bubble.stroke({ color: 0x38bdf8, width: 2 });
-
-        const bubbleText = new Text({
-          text: introMessage,
-          style: new TextStyle({
-            fontSize: 13,
-            fill: '#e5e7eb',
-            fontFamily: 'Arial',
-            wordWrap: true,
-            wordWrapWidth: bubbleWidth - 20,
-            lineHeight: 19,
-          }),
-        });
-        bubbleText.anchor.set(0.5, 0.5);
-        bubbleText.position.set(0, bubbleY + bubbleHeight / 2);
-
-        const bubbleContainer = new Container();
-        bubbleContainer.addChild(bubble);
-        bubbleContainer.addChild(bubbleText);
-        doctorContainer.addChild(bubbleContainer);
-
-        let elapsed = 0;
-        const durationMs = 4000;
-
-        const introTicker = (_ticker: any) => {
-          if (!isRenderActive()) {
-            app.ticker.remove(introTicker);
-            return;
-          }
-          elapsed += (app.ticker.deltaMS || 16.67);
-          const t = Math.min(1, elapsed / durationMs);
-          const ease = 1 - Math.pow(1 - t, 3);
-          player.position.x = originalPlayerX - startOffset + startOffset * ease;
-          doctorContainer.position.x = originalDoctorX - startOffset + startOffset * ease;
-
-          if (t >= 1) {
-            app.ticker.remove(introTicker);
-
-            let fadeElapsed = 0;
-            const fadeDuration = 1200;
-            const fadeTicker = (_t: any) => {
-              if (!isRenderActive()) {
-                app.ticker.remove(fadeTicker);
-                return;
-              }
-              fadeElapsed += (app.ticker.deltaMS || 16.67);
-              const ft = Math.min(1, fadeElapsed / fadeDuration);
-              bubbleContainer.alpha = 1 - ft;
-              if (ft >= 1) {
-                app.ticker.remove(fadeTicker);
-                doctorContainer.removeChild(bubbleContainer);
-              }
-            };
-            app.ticker.add(fadeTicker);
-          }
-        };
-
-        app.ticker.add(introTicker);
-      }
-
       // ── Initial character positions ────────────────────────────────────────
-      const progressIdx = Math.max(-1, Math.min(completed - 1, starCount - 1));
+      const progressIdx = activeIdx;
       const mapKey = `river:${starCount}:${total}`;
-      if (lastMapKeyRef.current !== mapKey) { lastMapKeyRef.current = mapKey; lastCompletedRef.current = progressIdx; }
-      const previousProgress = Math.max(-1, Math.min(lastCompletedRef.current, starCount - 1));
-      const shouldPlayWalk = progressIdx > previousProgress;
+      const isNewMap = lastMapKeyRef.current !== mapKey;
+      if (isNewMap) {
+        lastMapKeyRef.current = mapKey;
+        lastCompletedRef.current = introMessage ? -1 : progressIdx;
+      }
+      const forcedStartIdx = introMessage ? -1 : companionMessage ? Math.max(-1, progressIdx - 1) : null;
+      const previousProgress = forcedStartIdx ?? Math.max(-1, Math.min(lastCompletedRef.current, starCount - 1));
+      const shouldPlayWalk = progressIdx > previousProgress || Boolean(introMessage || companionMessage);
       lastCompletedRef.current = progressIdx;
 
       const startPos = getPlayerPos(previousProgress);
@@ -1163,7 +1153,7 @@ export default function GameCanvas({
       let y = shouldPlayWalk ? startPos.y : currentPos.y;
       let targetX = currentPos.x;
       let targetY = currentPos.y;
-      const walkDurationMs = 2000;
+      const walkDurationMs = introMessage ? 5200 : shouldPlayWalk ? 3600 : 2000;
       const walkStart = performance.now();
       let isWalkingToNext = shouldPlayWalk;
       let isPlayerWalkingAnim = shouldPlayWalk;
@@ -1177,13 +1167,18 @@ export default function GameCanvas({
       let docTargetX = docCurrentPos.x;
       let docTargetY = docCurrentPos.y;
       doctorContainer.position.set(docX, docY);
+      let activeBubble: Container | null = null;
+      if (introMessage || companionMessage) {
+        activeBubble = createDoctorBubble(companionMessage || introMessage || '');
+        doctorContainer.addChild(activeBubble);
+      }
 
       // ── Animation ticker ───────────────────────────────────────────────────
       let tick = 0;
       app.ticker.add(() => {
         if (!isRenderActive()) return;
         tick += 0.03;
-        const liveIdx = Math.max(-1, Math.min(completed - 1, starCount - 1));
+        const liveIdx = activeIdx;
         const livePos = getPlayerPos(liveIdx);
         targetX = livePos.x; targetY = livePos.y;
         const liveDocPos = getDoctorPos(liveIdx);
@@ -1191,11 +1186,20 @@ export default function GameCanvas({
 
         if (isWalkingToNext) {
           const t = Math.min(1, (performance.now() - walkStart) / walkDurationMs);
-          x = startPos.x + (targetX - startPos.x) * t;
-          y = startPos.y + (targetY - startPos.y) * t;
-          docX = docStartPos.x + (docTargetX - docStartPos.x) * t;
-          docY = docStartPos.y + (docTargetY - docStartPos.y) * t;
-          if (t >= 1) { isWalkingToNext = false; isPlayerWalkingAnim = false; }
+          const ease = t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
+          x = startPos.x + (targetX - startPos.x) * ease;
+          y = startPos.y + (targetY - startPos.y) * ease;
+          docX = docStartPos.x + (docTargetX - docStartPos.x) * ease;
+          docY = docStartPos.y + (docTargetY - docStartPos.y) * ease;
+          if (t >= 1) {
+            isWalkingToNext = false;
+            isPlayerWalkingAnim = false;
+            if (activeBubble) {
+              const done = onCompanionMessageDone;
+              fadeOutAndRemove(doctorContainer, activeBubble, companionMessage ? done : undefined);
+              activeBubble = null;
+            }
+          }
         } else {
           x += (targetX - x) * 0.12; y += (targetY - y) * 0.12;
           docX += (docTargetX - docX) * 0.08; docY += (docTargetY - docY) * 0.08;
@@ -1246,7 +1250,18 @@ export default function GameCanvas({
         clickableGlow.alpha = 0.08 + Math.sin(tick * 3) * 0.05;
       });
     },
-    [onCheckpointClick, checklistItems, eventsPerStar, loadAnimationFrames, loadKenneyCharacterFrames, userName, playerCharacterId]
+    [
+      onCheckpointClick,
+      checklistItems,
+      eventsPerStar,
+      loadAnimationFrames,
+      loadKenneyCharacterFrames,
+      userName,
+      playerCharacterId,
+      introMessage,
+      companionMessage,
+      onCompanionMessageDone,
+    ]
   );
 
   useEffect(() => {
@@ -1297,7 +1312,7 @@ export default function GameCanvas({
         appRef.current.destroy(true); appRef.current = null;
       }
     };
-  }, [theme, completedCount, totalCount, mapSpec, drawMap, userName]);
+  }, [theme, completedCount, totalCount, mapSpec, drawMap, userName, introMessage, companionMessage]);
 
   return (
     <div

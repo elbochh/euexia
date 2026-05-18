@@ -1,4 +1,5 @@
 import { invokeTextModel } from '../googleGemma';
+import type { ExtractedMedication } from './medicationExtractor';
 
 export interface ChecklistItemData {
   title: string;
@@ -27,6 +28,8 @@ export interface ChecklistEventData {
   sequenceId: string;  // dependency chain id (event N requires N-1 in same sequenceId)
   starGroupId: string; // same starGroupId = same star on map
   orderInGroup: number; // 0, 1, 2, ... event N unlocks when previous in group is completed
+  durationDays?: number;
+  durationIsExplicit?: boolean;
 }
 
 /* ------------------------------------------------------------------ */
@@ -549,6 +552,313 @@ function shouldFilterTask(title: string, description: string, category: string):
   return false;
 }
 
+type ParsedMedicationSchedule = {
+  name: string;
+  dose: string;
+  frequency: string;
+  route: string;
+  duration: string;
+  notes: string;
+  durationDays: number;
+  durationIsExplicit: boolean;
+  timesPerDay: number;
+  asNeeded: boolean;
+  timeSlots: number[];
+};
+
+const DEFAULT_MEDICATION_REMINDER_DAYS = 14;
+
+const NUMBER_WORDS: Record<string, number> = {
+  one: 1,
+  two: 2,
+  three: 3,
+  four: 4,
+  five: 5,
+  six: 6,
+  seven: 7,
+  eight: 8,
+  nine: 9,
+  ten: 10,
+  eleven: 11,
+  twelve: 12,
+  fourteen: 14,
+};
+
+function cleanMedicationCell(value: string): string {
+  return value
+    .replace(/\*\*/g, '')
+    .replace(/\*/g, '')
+    .replace(/`/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function cleanMedicationName(value: string): string {
+  return cleanMedicationCell(value)
+    .replace(/^take\s+/i, '')
+    .replace(/^as needed:\s*/i, '')
+    .replace(/[.,;:]+$/g, '')
+    .trim();
+}
+
+function medicationKey(name: string): string {
+  return cleanMedicationName(name).replace(/[^a-z0-9]/gi, '').toLowerCase();
+}
+
+function localDateKey(date: Date): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function parseDurationDays(text: string): number | null {
+  const normalized = text.toLowerCase();
+  const numeric = normalized.match(/\b(\d+)\s*(day|days|week|weeks|month|months)\b/);
+  if (numeric) {
+    const amount = Number(numeric[1]);
+    const unit = numeric[2];
+    if (unit.startsWith('day')) return amount;
+    if (unit.startsWith('week')) return amount * 7;
+    if (unit.startsWith('month')) return amount * 30;
+  }
+
+  const word = normalized.match(
+    /\b(one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|fourteen)\s*(day|days|week|weeks|month|months)\b/
+  );
+  if (word) {
+    const amount = NUMBER_WORDS[word[1]];
+    const unit = word[2];
+    if (unit.startsWith('day')) return amount;
+    if (unit.startsWith('week')) return amount * 7;
+    if (unit.startsWith('month')) return amount * 30;
+  }
+
+  return null;
+}
+
+function parseTimesPerDay(frequency: string): { timesPerDay: number; asNeeded: boolean; timeSlots: number[] } {
+  const text = frequency.toLowerCase();
+  const asNeeded = /\b(when required|as needed|prn|sos)\b/.test(text);
+  if (asNeeded) {
+    return { timesPerDay: 0, asNeeded: true, timeSlots: [] };
+  }
+
+  if (/\b(four times|4 times|qid)\b/.test(text)) {
+    return { timesPerDay: 4, asNeeded: false, timeSlots: [8, 12, 18, 22] };
+  }
+  if (/\b(three times|3 times|tds|tid)\b/.test(text)) {
+    return { timesPerDay: 3, asNeeded: false, timeSlots: [8, 14, 20] };
+  }
+  if (/\b(twice|two times|2 times|bd|bid)\b/.test(text)) {
+    return { timesPerDay: 2, asNeeded: false, timeSlots: [8, 18] };
+  }
+  if (/\b(night|nightly|every night|bedtime)\b/.test(text)) {
+    return { timesPerDay: 1, asNeeded: false, timeSlots: [19] };
+  }
+  if (/\b(afternoon)\b/.test(text)) {
+    return { timesPerDay: 1, asNeeded: false, timeSlots: [14] };
+  }
+  if (/\b(evening)\b/.test(text)) {
+    return { timesPerDay: 1, asNeeded: false, timeSlots: [18] };
+  }
+
+  return { timesPerDay: 1, asNeeded: false, timeSlots: [8] };
+}
+
+function parseMedicationSchedule(
+  med: ExtractedMedication,
+  paragraph: string
+): ParsedMedicationSchedule | null {
+  const cells = med.rawMatch
+    .split('|')
+    .map(cleanMedicationCell)
+    .filter(Boolean);
+
+  let name = cleanMedicationName(cells[0] || med.name);
+  let dose = '';
+  let frequency = '';
+  let route = '';
+  let duration = '';
+  let notes = '';
+
+  if (cells.length >= 5) {
+    dose = cells[1] || '';
+    frequency = cells[2] || '';
+    route = cells[3] || '';
+    duration = cells[4] || '';
+    notes = cells.slice(5).join('; ');
+  } else {
+    const raw = cleanMedicationCell(med.rawMatch);
+    const doseMatch = raw.match(/\b(\d+(?:\.\d+)?\s*(?:mg|mcg|micrograms?|g|ml|mL)|two tablets?|one tablet|[\w-]+\s+tablets?)\b/i);
+    const freqMatch = raw.match(/\b(once daily|twice daily|three times daily|four times daily|every night|when required|as needed|prn)\b/i);
+    const routeMatch = raw.match(/\b(orally|oral|sublingual|topical|inhaled|subcutaneous|intravenous)\b/i);
+    dose = doseMatch?.[1] || '';
+    frequency = freqMatch?.[1] || '';
+    route = routeMatch?.[1] || '';
+    duration = '';
+  }
+
+  name = name.replace(/\s+/g, ' ').trim();
+  if (!name) return null;
+
+  const durationFromMedication = parseDurationDays(`${duration} ${med.rawMatch}`);
+  const durationFromParagraph = parseDurationDays(paragraph);
+  const explicitDays = durationFromMedication ?? durationFromParagraph;
+  const schedule = parseTimesPerDay(`${frequency} ${med.rawMatch}`);
+
+  return {
+    name,
+    dose,
+    frequency,
+    route,
+    duration: duration || (explicitDays ? `${explicitDays} days` : ''),
+    notes,
+    durationDays: explicitDays ?? DEFAULT_MEDICATION_REMINDER_DAYS,
+    durationIsExplicit: explicitDays !== null,
+    ...schedule,
+  };
+}
+
+function dedupeMedicationSchedules(schedules: ParsedMedicationSchedule[]): ParsedMedicationSchedule[] {
+  const byKey = new Map<string, ParsedMedicationSchedule>();
+
+  for (const schedule of schedules) {
+    const key = medicationKey(schedule.name);
+    const existingKey = Array.from(byKey.keys()).find((candidate) =>
+      candidate.includes(key) || key.includes(candidate)
+    );
+
+    if (!existingKey) {
+      byKey.set(key, schedule);
+      continue;
+    }
+
+    const existing = byKey.get(existingKey)!;
+    const existingScore = [existing.dose, existing.frequency, existing.route, existing.duration, existing.notes]
+      .filter(Boolean).length;
+    const nextScore = [schedule.dose, schedule.frequency, schedule.route, schedule.duration, schedule.notes]
+      .filter(Boolean).length;
+    if (nextScore > existingScore || schedule.name.length > existing.name.length) {
+      byKey.delete(existingKey);
+      byKey.set(key, schedule);
+    }
+  }
+
+  return Array.from(byKey.values());
+}
+
+function makeMedicationDescription(
+  schedule: ParsedMedicationSchedule,
+  dayNumber?: number
+): string {
+  const details = [
+    schedule.dose,
+    schedule.route,
+    schedule.frequency,
+    schedule.duration ? `for ${schedule.duration}` : '',
+  ].filter(Boolean).join(', ');
+  const dayPrefix = dayNumber ? `Day ${dayNumber} of ${schedule.durationDays}. ` : '';
+  const note = schedule.notes ? ` ${schedule.notes}.` : '';
+  const missingDurationWarning = schedule.durationIsExplicit
+    ? ''
+    : ' Duration was not stated in the document; this is a reminder horizon, not a stop date. Review with a clinician or pharmacist.';
+
+  return `${dayPrefix}${details || 'Follow the prescription instructions.'}.${note}${missingDurationWarning}`.replace(/\s+/g, ' ').trim();
+}
+
+function generateMedicationEventsFromExtracted(
+  medications: ExtractedMedication[] | undefined,
+  paragraph: string,
+  now: Date
+): ChecklistEventData[] {
+  if (!medications || medications.length === 0) return [];
+
+  const schedules = dedupeMedicationSchedules(
+    medications
+      .map((med) => parseMedicationSchedule(med, paragraph))
+      .filter((schedule): schedule is ParsedMedicationSchedule => Boolean(schedule))
+  );
+  const events: ChecklistEventData[] = [];
+  const todayStart = new Date(now);
+  todayStart.setHours(0, 0, 0, 0);
+
+  for (const schedule of schedules) {
+    const seq = `med-${medicationKey(schedule.name)}`;
+    const baseTitle = `${schedule.asNeeded ? 'As Needed: ' : 'Take '}${schedule.name}`;
+
+    if (schedule.asNeeded) {
+      events.push({
+        title: baseTitle,
+        description: makeMedicationDescription(schedule),
+        category: 'medication',
+        xpReward: 30,
+        coinReward: 15,
+        unlockAt: now.toISOString(),
+        groupId: seq,
+        sequenceId: seq,
+        starGroupId: localDateKey(now),
+        orderInGroup: 0,
+        durationDays: schedule.durationDays,
+        durationIsExplicit: schedule.durationIsExplicit,
+      });
+      continue;
+    }
+
+    let order = 0;
+    for (let day = 0; day < schedule.durationDays; day++) {
+      for (const hour of schedule.timeSlots) {
+        const unlock = new Date(todayStart);
+        unlock.setDate(todayStart.getDate() + day);
+        unlock.setHours(hour, 0, 0, 0);
+        if (day === 0 && order === 0) {
+          unlock.setTime(now.getTime());
+        }
+
+        events.push({
+          title: baseTitle,
+          description: makeMedicationDescription(schedule, day + 1),
+          category: 'medication',
+          xpReward: schedule.timesPerDay > 1 ? 15 : 20,
+          coinReward: schedule.timesPerDay > 1 ? 5 : 10,
+          unlockAt: unlock.toISOString(),
+          groupId: seq,
+          sequenceId: seq,
+          starGroupId: localDateKey(unlock),
+          orderInGroup: order,
+          durationDays: schedule.durationDays,
+          durationIsExplicit: schedule.durationIsExplicit,
+        });
+        order++;
+      }
+    }
+  }
+
+  console.log(`[Checklist] Deterministic medication expansion: ${schedules.length} medications -> ${events.length} events`);
+  return events;
+}
+
+function sortEventsBySchedule(events: ChecklistEventData[]): ChecklistEventData[] {
+  return [...events].sort((a, b) => {
+    const dateA = new Date(a.unlockAt).getTime();
+    const dateB = new Date(b.unlockAt).getTime();
+    if (dateA !== dateB) return dateA - dateB;
+    return a.orderInGroup - b.orderInGroup;
+  });
+}
+
+function normalizeNonMedicationTime(unlockAt: string, category: string): string {
+  if (category === 'medication') return unlockAt;
+
+  const date = new Date(unlockAt);
+  const hour = date.getHours();
+  if (hour >= 6) return unlockAt;
+
+  const defaultHour = category === 'monitoring' || category === 'test' ? 8 : 9;
+  date.setHours(defaultHour, 0, 0, 0);
+  return date.toISOString();
+}
+
 function validateAndNormalizeEvents(raw: any[], now: Date): ChecklistEventData[] {
   const validCategories = ['medication', 'nutrition', 'exercise', 'monitoring', 'appointment', 'test', 'lifestyle', 'general'];
   const normalized = raw
@@ -561,14 +871,15 @@ function validateAndNormalizeEvents(raw: any[], now: Date): ChecklistEventData[]
         d.setHours(0, 0, 0, 0);
         unlockAt = d.toISOString();
       }
+      const category = validCategories.includes(item.category) ? item.category : 'general';
+      unlockAt = normalizeNonMedicationTime(unlockAt, category);
       const sequenceId = String(item.sequenceId ?? item.groupId ?? `seq-${index}`);
-      const dateKey = new Date(unlockAt).toISOString().slice(0, 10);
-      const starGroupId = String(item.starGroupId ?? dateKey);
+      const dateKey = localDateKey(new Date(unlockAt));
+      const starGroupId = dateKey;
       const groupId = String(item.groupId ?? sequenceId);
       const orderInGroup = typeof item.orderInGroup === 'number' ? Math.max(0, item.orderInGroup) : 0;
       const title = cleanTitle(String(item.title));
       const description = String(item.description ?? '');
-      const category = validCategories.includes(item.category) ? item.category : 'general';
       
       return {
         title,
@@ -597,15 +908,15 @@ function validateAndNormalizeEvents(raw: any[], now: Date): ChecklistEventData[]
   const deduplicated: ChecklistEventData[] = [];
   
   normalized.forEach((e) => {
-    // Create a unique key: sequenceId + title + unlockAt date (without time)
-    const unlockDate = new Date(e.unlockAt).toISOString().split('T')[0]; // YYYY-MM-DD
-    const key = `${e.sequenceId}_${e.title.toLowerCase().trim()}_${unlockDate}`;
+    // Keep separate same-day medication doses, e.g. morning/evening.
+    const unlockTime = new Date(e.unlockAt).toISOString();
+    const key = `${e.sequenceId}_${e.title.toLowerCase().trim()}_${unlockTime}`;
     
     if (!seen.has(key)) {
       seen.set(key, true);
       deduplicated.push(e);
     } else {
-      console.warn(`[Checklist] Duplicate event filtered: ${e.title} (sequenceId: ${e.sequenceId}, date: ${unlockDate})`);
+      console.warn(`[Checklist] Duplicate event filtered: ${e.title} (sequenceId: ${e.sequenceId}, time: ${unlockTime})`);
     }
   });
   
@@ -629,10 +940,18 @@ function validateAndNormalizeEvents(raw: any[], now: Date): ChecklistEventData[]
 /**
  * Structure care plan as events. One DB row per event; map has one star per groupId.
  */
-export async function structureChecklistAsEvents(paragraph: string): Promise<ChecklistEventData[]> {
+export async function structureChecklistAsEvents(
+  paragraph: string,
+  extractedMedications?: ExtractedMedication[]
+): Promise<ChecklistEventData[]> {
   const now = new Date();
   const nowIso = now.toISOString();
   const prompt = buildEventsPrompt(paragraph, nowIso);
+  const deterministicMedicationEvents = generateMedicationEventsFromExtracted(
+    extractedMedications,
+    paragraph,
+    now
+  );
 
   try {
     const result = await invokeTextModel(prompt, {
@@ -644,8 +963,11 @@ export async function structureChecklistAsEvents(paragraph: string): Promise<Che
     const parsed = extractJsonArray(result.text);
     const events = validateAndNormalizeEvents(parsed, now);
     if (events.length > 0) {
-      console.log(`[Checklist] structureChecklistAsEvents: ${events.length} events from configured text model`);
-      return events;
+      const combinedEvents = deterministicMedicationEvents.length > 0
+        ? [...deterministicMedicationEvents, ...events.filter((event) => event.category !== 'medication')]
+        : events;
+      console.log(`[Checklist] structureChecklistAsEvents: ${combinedEvents.length} events after medication expansion`);
+      return sortEventsBySchedule(combinedEvents);
     }
   } catch (err: any) {
     console.warn('[Checklist] structureChecklistAsEvents failed:', err.message);
@@ -674,12 +996,18 @@ export async function structureChecklistAsEvents(paragraph: string): Promise<Che
         unlockAt: unlock.toISOString(),
         groupId: `g${i}`,
         sequenceId: `g${i}`,
-        starGroupId: unlock.toISOString().slice(0, 10),
+        starGroupId: localDateKey(unlock),
         orderInGroup: j,
       });
     }
   }
   console.log(`[Checklist] structureChecklistAsEvents fallback: ${fallback.length} events`);
+  if (deterministicMedicationEvents.length > 0) {
+    return sortEventsBySchedule([
+      ...deterministicMedicationEvents,
+      ...fallback.filter((event) => event.category !== 'medication'),
+    ]);
+  }
   return fallback.length > 0 ? fallback : [{
     title: 'Follow care plan',
     description: paragraph.substring(0, 500),
@@ -689,7 +1017,7 @@ export async function structureChecklistAsEvents(paragraph: string): Promise<Che
     unlockAt: now.toISOString(),
     groupId: 'g0',
     sequenceId: 'g0',
-    starGroupId: now.toISOString().slice(0, 10),
+    starGroupId: localDateKey(now),
     orderInGroup: 0,
   }];
 }

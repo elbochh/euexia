@@ -171,7 +171,7 @@ export const createConsultation = async (req: AuthRequest, res: Response): Promi
     // ── Step 3: Structure checklist events via configured text model ──
     t = process.hrtime();
     console.log(`[Pipeline] Step 3: Structuring checklist events via configured text model...`);
-    const eventData = await structureChecklistAsEvents(checklistParagraph);
+    const eventData = await structureChecklistAsEvents(checklistParagraph, detectedMeds);
     timings['3_checklist_events'] = elapsed(t);
     console.log(`[Pipeline] Step 3 done in ${timings['3_checklist_events']}ms — ${eventData.length} events`);
 
@@ -180,14 +180,15 @@ export const createConsultation = async (req: AuthRequest, res: Response): Promi
     const now = new Date();
     const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
     
-    // Additional deduplication: remove events with same title, category, and same unlockAt date
+    // Additional deduplication: remove exact duplicate events while preserving same-day multiple doses.
     const seenBeforeSave = new Map<string, boolean>();
     const deduplicatedEvents = eventData.filter((event) => {
-      const unlockDate = new Date(event.unlockAt).toISOString().split('T')[0]; // YYYY-MM-DD
-      const key = `${event.category}_${event.title.toLowerCase().trim()}_${unlockDate}`;
+      const unlockTime = new Date(event.unlockAt).toISOString();
+      const sequenceId = event.sequenceId || event.groupId || '';
+      const key = `${event.category}_${sequenceId}_${event.title.toLowerCase().trim()}_${unlockTime}_${event.orderInGroup}`;
       
       if (seenBeforeSave.has(key)) {
-        console.warn(`[Checklist] Duplicate event filtered before save: ${event.title} (category: ${event.category}, date: ${unlockDate})`);
+        console.warn(`[Checklist] Duplicate event filtered before save: ${event.title} (category: ${event.category}, time: ${unlockTime})`);
         return false;
       }
       
@@ -246,7 +247,7 @@ export const createConsultation = async (req: AuthRequest, res: Response): Promi
         let expiresAt: Date | null = null;
         if (event.category === 'medication') {
           const seqId = event.sequenceId || event.groupId || '';
-          if (seqId && medicationSequenceExpiry.has(seqId)) {
+          if (seqId && medicationSequenceExpiry.has(seqId) && event.durationIsExplicit !== false) {
             expiresAt = medicationSequenceExpiry.get(seqId)!;
           }
         }
@@ -262,7 +263,7 @@ export const createConsultation = async (req: AuthRequest, res: Response): Promi
             if (firstEvent) {
               const firstDate = new Date(firstEvent.unlockAt);
               const lastDate = medicationSequenceExpiry.get(seqId)!;
-              durationDays = Math.ceil((lastDate.getTime() - firstDate.getTime()) / (1000 * 60 * 60 * 24));
+              durationDays = event.durationDays ?? Math.ceil((lastDate.getTime() - firstDate.getTime()) / (1000 * 60 * 60 * 24));
             }
           }
         }

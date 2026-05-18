@@ -4,7 +4,6 @@ import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { motion } from 'framer-motion';
 import TopBar from '@/components/ui/TopBar';
-import BottomNav from '@/components/ui/BottomNav';
 import { useGameStore } from '@/stores/gameStore';
 import { DEFAULT_CHARACTER_ID, getCharacterSpriteSrc } from '@/lib/characters';
 
@@ -174,8 +173,6 @@ export default function LeaderboardPage() {
         </div>
       </div>
 
-      <BottomNav />
     </div>
   );
 }
-
