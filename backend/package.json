@@ -9,7 +9,8 @@
     "start": "node dist/index.js",
     "test:gemma": "npx ts-node src/scripts/testGemma.ts",
     "test:gemma-custom": "npx ts-node src/scripts/testGemmaCustom.ts",
-    "test:gemma-image": "npx ts-node src/scripts/testGemmaImage.ts"
+    "test:gemma-image": "npx ts-node src/scripts/testGemmaImage.ts",
+    "benchmark:gemma-gemini": "npx ts-node src/scripts/compareGemmaGeminiWorkflow.ts"
   },
   "dependencies": {
     "google-auth-library": "^9.15.1",
